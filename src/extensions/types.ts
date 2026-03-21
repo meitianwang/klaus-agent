@@ -1,10 +1,9 @@
 // Extension system types
 
 import type { TSchema } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult, BeforeToolCallContext, BeforeToolCallResult, AfterToolCallContext, AfterToolCallResult } from "../tools/types.js";
-import type { AgentMessage, AgentEvent, ThinkingLevel } from "../types.js";
+import type { AgentTool, AgentToolResult } from "../tools/types.js";
+import type { AgentMessage, ThinkingLevel } from "../types.js";
 import type { Message, ToolDefinition } from "../llm/types.js";
-import type { SessionManager } from "../session/session-manager.js";
 
 // --- Extension factory ---
 
