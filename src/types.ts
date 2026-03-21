@@ -55,6 +55,9 @@ export type AgentEvent =
   | { type: "compaction_end"; summary: string }
   | { type: "checkpoint"; id: number }
   | { type: "dmail_received"; checkpoint: number; content: string }
+  | { type: "task_started"; taskId: string; taskName: string }
+  | { type: "task_completed"; taskId: string; taskName: string }
+  | { type: "task_failed"; taskId: string; taskName: string; error: string }
   | { type: "error"; error: Error };
 
 // --- Agent hooks ---

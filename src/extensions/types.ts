@@ -44,7 +44,11 @@ export type ExtensionEventType =
   // Session
   | "session_start"
   | "session_switch"
-  | "session_fork";
+  | "session_fork"
+  // Background tasks
+  | "task_started"
+  | "task_completed"
+  | "task_failed";
 
 // --- Event payloads & results ---
 
@@ -162,6 +166,10 @@ export interface ExtensionEventMap {
   session_start: { payload: SessionEvent; result: void };
   session_switch: { payload: SessionEvent; result: void };
   session_fork: { payload: SessionEvent; result: void };
+  // Background tasks
+  task_started: { payload: { taskId: string; taskName: string }; result: void };
+  task_completed: { payload: { taskId: string; taskName: string; result: unknown }; result: void };
+  task_failed: { payload: { taskId: string; taskName: string; error: string }; result: void };
 }
 
 export type ExtensionHandler<E extends ExtensionEventType> =

@@ -20,6 +20,7 @@ import type { ExtensionFactory } from "../extensions/types.js";
 import type { SubagentConfig } from "../multi-agent/types.js";
 import type { SkillSource } from "../skills/types.js";
 import type { MCPServerConfig, MCPClient } from "../tools/mcp-adapter.js";
+import type { TaskFactory } from "../background/types.js";
 import { SessionManager } from "../session/session-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import { InjectionManager } from "../injection/injection-manager.js";
@@ -31,6 +32,9 @@ import { MCPAdapter } from "../tools/mcp-adapter.js";
 import { discoverSkills } from "../skills/discovery.js";
 import { createInvokeSkillTool } from "../skills/skill-tool.js";
 import { LLMSummarizer, agentMessagesToCompactionInput } from "../compaction/summarizer.js";
+import { Wire } from "../wire/wire.js";
+import { BackgroundTaskManager } from "../background/task-manager.js";
+import { createBackgroundTaskTools } from "../background/tools.js";
 import { runAgentLoop } from "./agent-loop.js";
 
 export interface AgentConfig {
@@ -54,6 +58,8 @@ export interface AgentConfig {
   subagents?: Record<string, SubagentConfig>;
   skills?: SkillSource[];
   mcp?: { servers: MCPServerConfig[]; clientFactory: (config: MCPServerConfig) => MCPClient };
+  wire?: { bufferSize?: number };
+  backgroundTasks?: { factories?: Record<string, TaskFactory> };
 }
 
 export class Agent {
@@ -75,6 +81,8 @@ export class Agent {
   private _laborMarket: LaborMarket | undefined;
   private _taskExecutor: TaskExecutor | undefined;
   private _mcpAdapter: MCPAdapter | undefined;
+  private _wire: Wire;
+  private _backgroundTaskManager: BackgroundTaskManager | undefined;
   private _initialized = false;
 
   constructor(config: AgentConfig) {
@@ -82,6 +90,7 @@ export class Agent {
     this._provider = config.provider;
     this._approval = config.approval;
     this._name = config.name ?? "agent";
+    this._wire = new Wire({ bufferSize: config.wire?.bufferSize ?? 0 });
 
     this._state = {
       systemPrompt: typeof config.systemPrompt === "string" ? config.systemPrompt : "",
@@ -117,6 +126,23 @@ export class Agent {
       this._laborMarket = new LaborMarket();
       this._taskExecutor = new TaskExecutor(this._laborMarket, (name, event) => {
         this._emit({ ...event, type: event.type } as AgentEvent);
+      });
+    }
+
+    // Background tasks
+    if (config.backgroundTasks) {
+      this._backgroundTaskManager = new BackgroundTaskManager((taskEvent) => {
+        const { task } = taskEvent;
+        if (taskEvent.type === "task_started") {
+          this._emit({ type: "task_started", taskId: task.id, taskName: task.name });
+          this._extensionRunner?.emitSimple("task_started", { taskId: task.id, taskName: task.name });
+        } else if (taskEvent.type === "task_completed") {
+          this._emit({ type: "task_completed", taskId: task.id, taskName: task.name });
+          this._extensionRunner?.emitSimple("task_completed", { taskId: task.id, taskName: task.name, result: taskEvent.result });
+        } else if (taskEvent.type === "task_failed") {
+          this._emit({ type: "task_failed", taskId: task.id, taskName: task.name, error: taskEvent.error });
+          this._extensionRunner?.emitSimple("task_failed", { taskId: task.id, taskName: task.name, error: taskEvent.error });
+        }
       });
     }
   }
@@ -204,6 +230,14 @@ export class Agent {
     return this._mcpAdapter;
   }
 
+  get wire(): Wire {
+    return this._wire;
+  }
+
+  get backgroundTasks(): BackgroundTaskManager | undefined {
+    return this._backgroundTaskManager;
+  }
+
   setSystemPrompt(prompt: string): void {
     this._state.systemPrompt = prompt;
   }
@@ -232,6 +266,8 @@ export class Agent {
     this._steeringQueue = [];
     this._followUpQueue = [];
     await this._mcpAdapter?.dispose();
+    this._backgroundTaskManager?.dispose();
+    this._wire.dispose();
   }
 
   // --- Internal ---
@@ -296,6 +332,12 @@ export class Agent {
       // Add built-in TaskTool so LLM can delegate to subagents
       this._state.tools = [...this._state.tools, createTaskTool(this._laborMarket, this._taskExecutor)];
     }
+
+    // Background task tools
+    if (this._backgroundTaskManager) {
+      const bgTools = createBackgroundTaskTools(this._backgroundTaskManager, this._config.backgroundTasks?.factories);
+      this._state.tools = [...this._state.tools, ...bgTools];
+    }
   }
 
   private _normalizeInput(input: string | AgentMessage | AgentMessage[]): AgentMessage[] {
@@ -315,6 +357,7 @@ export class Agent {
         // Listener errors should not break the loop
       }
     }
+    this._wire.publish(event.type, event);
   }
 
   private async _runLoop(): Promise<AgentMessage[]> {

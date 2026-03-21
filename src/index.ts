@@ -14,6 +14,7 @@ import type { ExtensionFactory } from "./extensions/types.js";
 import type { SubagentConfig } from "./multi-agent/types.js";
 import type { SkillSource } from "./skills/types.js";
 import type { MCPServerConfig, MCPClient } from "./tools/mcp-adapter.js";
+import type { TaskFactory } from "./background/types.js";
 
 export interface CreateAgentConfig {
   // Required
@@ -38,6 +39,8 @@ export interface CreateAgentConfig {
   subagents?: Record<string, SubagentConfig>;
   skills?: SkillSource[];
   mcp?: { servers: MCPServerConfig[]; clientFactory: (config: MCPServerConfig) => MCPClient };
+  wire?: { bufferSize?: number };
+  backgroundTasks?: { factories?: Record<string, TaskFactory> };
 
   // Advanced: provide your own LLM provider
   provider?: LLMProvider;
@@ -66,6 +69,8 @@ export function createAgent(config: CreateAgentConfig): Agent {
     subagents: config.subagents,
     skills: config.skills,
     mcp: config.mcp,
+    wire: config.wire,
+    backgroundTasks: config.backgroundTasks,
   });
 }
 
@@ -88,6 +93,9 @@ export { loadSkill, renderSkillTemplate } from "./skills/loader.js";
 export { MCPAdapter } from "./tools/mcp-adapter.js";
 export { estimateTokens, shouldCompact, findCutPoint } from "./compaction/compaction.js";
 export { LLMSummarizer } from "./compaction/summarizer.js";
+export { Wire } from "./wire/wire.js";
+export { BackgroundTaskManager } from "./background/task-manager.js";
+export { createBackgroundTaskTools } from "./background/tools.js";
 
 // Core types
 export type {
@@ -199,3 +207,15 @@ export type { Skill, SkillSource } from "./skills/types.js";
 
 // MCP types
 export type { MCPServerConfig, MCPTransport, MCPServerStatus, MCPClient } from "./tools/mcp-adapter.js";
+
+// Wire types
+export type { WireMessage, WireSubscriber, WireSubscription } from "./wire/types.js";
+
+// Background task types
+export type {
+  BackgroundTaskStatus,
+  BackgroundTaskInfo,
+  BackgroundTaskHandle,
+  BackgroundTaskEvent,
+  TaskFactory,
+} from "./background/types.js";
