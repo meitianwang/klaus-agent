@@ -176,12 +176,22 @@ export type {
   ExtensionFactory,
   ExtensionAPI,
   ExtensionEventType,
+  ExtensionEventMap,
+  ExtensionHandler,
+  BeforeAgentStartEvent,
+  BeforeAgentStartResult,
+  BeforeProviderRequestEvent,
+  BeforeProviderRequestResult,
   ToolCallEvent,
   ToolCallEventResult,
   ToolResultEvent,
   ToolResultEventResult,
   ContextEvent,
   ContextEventResult,
+  BeforeCompactEvent,
+  BeforeCompactResult,
+  AfterCompactEvent,
+  SessionEvent,
 } from "./extensions/types.js";
 
 // Skill types

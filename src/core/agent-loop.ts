@@ -97,9 +97,28 @@ export async function runAgentLoop(
   const { onEvent, sessionManager, checkpointManager, injectionManager, extensionRunner, compaction } = config;
 
   // Merge extension-registered tools with config tools
-  const allTools = extensionRunner
+  let allTools = extensionRunner
     ? [...config.tools, ...extensionRunner.getRegisteredTools()]
     : config.tools;
+
+  // Mutable copies of config values that before_agent_start can override
+  let { modelId, systemPrompt, thinkingLevel } = config;
+
+  // --- before_agent_start: let extensions modify agent config ---
+  if (extensionRunner) {
+    const result = await extensionRunner.emitBeforeAgentStart({
+      systemPrompt,
+      tools: allTools,
+      modelId,
+      thinkingLevel,
+    });
+    if (result) {
+      if (result.systemPrompt !== undefined) systemPrompt = result.systemPrompt;
+      if (result.tools !== undefined) allTools = result.tools;
+      if (result.modelId !== undefined) modelId = result.modelId;
+      if (result.thinkingLevel !== undefined) thinkingLevel = result.thinkingLevel;
+    }
+  }
 
   onEvent({ type: "agent_start" });
   await extensionRunner?.emitSimple("agent_start");
@@ -170,6 +189,11 @@ export async function runAgentLoop(
                 }
 
                 onEvent({ type: "compaction_end", summary });
+                await extensionRunner?.emitSimple("after_compact", {
+                  summary,
+                  tokensBefore: tokens,
+                  tokensAfter: estimateTokens(allMessages),
+                });
               }
             }
           }
@@ -223,14 +247,34 @@ export async function runAgentLoop(
 
         // --- Stream LLM response ---
         const toolDefs = toolsToDefinitions(allTools);
-        const requestOptions: LLMRequestOptions = {
-          model: config.modelId,
-          systemPrompt: config.systemPrompt,
+        let requestOptions: LLMRequestOptions = {
+          model: modelId,
+          systemPrompt,
           messages: llmMessages,
           tools: toolDefs.length > 0 ? toolDefs : undefined,
-          thinkingLevel: config.capabilities?.thinking !== false ? config.thinkingLevel : undefined,
+          thinkingLevel: config.capabilities?.thinking !== false ? thinkingLevel : undefined,
           signal: config.signal,
         };
+
+        // --- before_provider_request: let extensions modify LLM request ---
+        if (extensionRunner) {
+          const reqResult = await extensionRunner.emitBeforeProviderRequest({
+            model: requestOptions.model,
+            systemPrompt: requestOptions.systemPrompt,
+            messages: requestOptions.messages,
+            tools: requestOptions.tools,
+            thinkingLevel: requestOptions.thinkingLevel,
+          });
+          if (reqResult) {
+            requestOptions = {
+              ...requestOptions,
+              ...(reqResult.systemPrompt !== undefined && { systemPrompt: reqResult.systemPrompt }),
+              ...(reqResult.messages !== undefined && { messages: reqResult.messages }),
+              ...(reqResult.tools !== undefined && { tools: reqResult.tools }),
+              ...(reqResult.thinkingLevel !== undefined && { thinkingLevel: reqResult.thinkingLevel }),
+            };
+          }
+        }
 
         let assistantMessage: AssistantMessage | null = null;
         let usage: TokenUsage | undefined;

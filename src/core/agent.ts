@@ -255,6 +255,13 @@ export class Agent {
       await this._extensionRunner.loadExtensions(this._config.extensions);
     }
 
+    // Notify extensions of session start
+    if (this._sessionManager && this._extensionRunner) {
+      await this._extensionRunner.emitSimple("session_start", {
+        sessionId: this._sessionManager.getSessionId(),
+      });
+    }
+
     // Load MCP tools in background
     if (this._mcpAdapter) {
       this._mcpAdapter.startLoading();

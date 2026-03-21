@@ -6,6 +6,10 @@ import type {
   ExtensionEventType,
   ExtensionHandler,
   ExtensionEventMap,
+  BeforeAgentStartEvent,
+  BeforeAgentStartResult,
+  BeforeProviderRequestEvent,
+  BeforeProviderRequestResult,
   ToolCallEvent,
   ToolCallEventResult,
   ToolResultEvent,
@@ -59,12 +63,10 @@ export class ExtensionRunner {
     }
   }
 
-  // Collect all tools registered by extensions
   getRegisteredTools(): AgentTool[] {
     return this._extensions.flatMap((ext) => ext.tools);
   }
 
-  // Collect all commands
   getCommand(name: string): CommandHandler | undefined {
     for (const ext of this._extensions) {
       const handler = ext.commands.get(name);
@@ -73,14 +75,21 @@ export class ExtensionRunner {
     return undefined;
   }
 
-  // Drain pending messages from extensions
   drainPendingMessages(): AgentMessage[] {
     const msgs = [...this._pendingMessages];
     this._pendingMessages = [];
     return msgs;
   }
 
-  // --- Event emission ---
+  // --- Interceptable event emitters (type-safe, return results) ---
+
+  async emitBeforeAgentStart(event: BeforeAgentStartEvent): Promise<BeforeAgentStartResult | void> {
+    return this._emit("before_agent_start", event);
+  }
+
+  async emitBeforeProviderRequest(event: BeforeProviderRequestEvent): Promise<BeforeProviderRequestResult | void> {
+    return this._emit("before_provider_request", event);
+  }
 
   async emitToolCall(event: ToolCallEvent): Promise<ToolCallEventResult | void> {
     return this._emit("tool_call", event);
@@ -97,6 +106,8 @@ export class ExtensionRunner {
   async emitBeforeCompact(event: BeforeCompactEvent): Promise<BeforeCompactResult | void> {
     return this._emit("before_compact", event);
   }
+
+  // --- Notification emitter (fire-and-forget) ---
 
   async emitSimple(eventType: ExtensionEventType, payload?: any): Promise<void> {
     await this._emit(eventType, payload);
