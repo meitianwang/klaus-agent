@@ -344,6 +344,8 @@ export class Agent {
         toolExecution: this._config.toolExecution ?? "parallel",
         maxStepsPerTurn: this._config.maxStepsPerTurn ?? 50,
         hooks: this._config.hooks,
+        thinkingLevel: this._state.thinkingLevel,
+        capabilities: this._state.model.capabilities,
         signal: this._abortController.signal,
         getSteeringMessages: () => {
           const msgs = [...this._steeringQueue];

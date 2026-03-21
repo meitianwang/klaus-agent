@@ -29,7 +29,7 @@ function estimateMessageTokens(msg: AgentMessage): number {
     return m.content.reduce((sum, block) => {
       if (block.type === "text") return sum + Math.ceil(block.text.length / CHARS_PER_TOKEN);
       if (block.type === "thinking") return sum + Math.ceil(block.thinking.length / CHARS_PER_TOKEN);
-      if (block.type === "tool_use") return sum + Math.ceil(JSON.stringify(block.input).length / CHARS_PER_TOKEN) + 20;
+      if (block.type === "tool_call") return sum + Math.ceil(JSON.stringify(block.input).length / CHARS_PER_TOKEN) + 20;
       return sum;
     }, 0);
   }
@@ -108,7 +108,7 @@ export function messagesToText(messages: AgentMessage[]): string {
       parts.push(`User: ${text}`);
     } else if (m.role === "assistant") {
       const text = m.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-      const toolCalls = m.content.filter((b) => b.type === "tool_use").map((b) => (b as { name: string }).name);
+      const toolCalls = m.content.filter((b) => b.type === "tool_call").map((b) => (b as { name: string }).name);
       parts.push(`Assistant: ${text}${toolCalls.length ? ` [tools: ${toolCalls.join(", ")}]` : ""}`);
     } else if (m.role === "tool_result") {
       const text = typeof m.content === "string" ? m.content : m.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");

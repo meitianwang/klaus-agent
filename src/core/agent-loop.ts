@@ -11,6 +11,7 @@ import type {
   ToolCallBlock,
   TokenUsage,
   UserMessage,
+  ThinkingLevel,
 } from "../types.js";
 import type { AgentTool } from "../tools/types.js";
 import type { LLMProvider, LLMRequestOptions, ToolDefinition, AssistantMessageEvent } from "../llm/types.js";
@@ -33,6 +34,8 @@ export interface AgentLoopConfig {
   agentName: string;
   toolExecution: "sequential" | "parallel";
   maxStepsPerTurn: number;
+  thinkingLevel?: ThinkingLevel;
+  capabilities?: { vision?: boolean; thinking?: boolean };
   hooks?: AgentHooks;
   getSteeringMessages?: () => AgentMessage[];
   getFollowUpMessages?: () => AgentMessage[];
@@ -54,24 +57,35 @@ function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   );
 }
 
+/** Strip image content blocks from messages when the model lacks vision. */
+function stripImages(messages: Message[]): Message[] {
+  return messages.map((m) => {
+    if ((m.role === "user" || m.role === "tool_result") && Array.isArray(m.content)) {
+      const filtered = m.content.filter((b) => b.type !== "image");
+      return { ...m, content: filtered.length > 0 ? filtered : "[image removed — model does not support vision]" };
+    }
+    return m;
+  });
+}
+
 function toolsToDefinitions(tools: AgentTool[]): ToolDefinition[] {
   return tools.map((t) => ({
     name: t.name,
     description: t.description,
-    input_schema: t.parameters as any,
+    inputSchema: t.parameters as any,
   }));
 }
 
 function extractToolCalls(message: AssistantMessage): ToolCallBlock[] {
-  return message.content.filter((b): b is ToolCallBlock => b.type === "tool_use");
+  return message.content.filter((b): b is ToolCallBlock => b.type === "tool_call");
 }
 
 function toolResultsToMessages(results: ToolCallResult[]): ToolResultMessage[] {
   return results.map((r) => ({
     role: "tool_result" as const,
-    tool_use_id: r.toolCallId,
+    toolCallId: r.toolCallId,
     content: r.result.content,
-    is_error: r.isError || undefined,
+    isError: r.isError || undefined,
   }));
 }
 
@@ -200,7 +214,12 @@ export async function runAgentLoop(
 
         // --- Convert to LLM messages ---
         const convertToLlm = config.hooks?.convertToLlm ?? defaultConvertToLlm;
-        const llmMessages = convertToLlm(contextMessages);
+        let llmMessages = convertToLlm(contextMessages);
+
+        // --- Strip images if model lacks vision ---
+        if (config.capabilities?.vision === false) {
+          llmMessages = stripImages(llmMessages);
+        }
 
         // --- Stream LLM response ---
         const toolDefs = toolsToDefinitions(allTools);
@@ -209,6 +228,7 @@ export async function runAgentLoop(
           systemPrompt: config.systemPrompt,
           messages: llmMessages,
           tools: toolDefs.length > 0 ? toolDefs : undefined,
+          thinkingLevel: config.capabilities?.thinking !== false ? config.thinkingLevel : undefined,
           signal: config.signal,
         };
 

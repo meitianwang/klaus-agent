@@ -69,7 +69,7 @@ export function agentMessagesToCompactionInput(messages: AgentMessage[]): Compac
       results.push({ role: "user", content: text });
     } else if (m.role === "assistant") {
       const text = (m.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-      const toolCalls = (m.content ?? []).filter((b: any) => b.type === "tool_use").map((b: any) => b.name);
+      const toolCalls = (m.content ?? []).filter((b: any) => b.type === "tool_call").map((b: any) => b.name);
       const suffix = toolCalls.length ? ` [tools: ${toolCalls.join(", ")}]` : "";
       results.push({ role: "assistant", content: text + suffix });
     } else if (m.role === "tool_result") {

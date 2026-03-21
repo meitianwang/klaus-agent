@@ -5,7 +5,11 @@ export interface ModelConfig {
   model: string;
   apiKey?: string;
   baseUrl?: string;
-  maxContextTokens?: number;
+  maxContextTokens: number;
+  capabilities?: {
+    vision?: boolean;
+    thinking?: boolean;
+  };
 }
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -19,7 +23,7 @@ export interface TextContent {
 
 export interface ImageContent {
   type: "image";
-  source: { type: "base64"; media_type: string; data: string } | { type: "url"; url: string };
+  source: { type: "base64"; mediaType: string; data: string } | { type: "url"; url: string };
 }
 
 export type ContentBlock = TextContent | ImageContent;
@@ -29,7 +33,7 @@ export type ContentBlock = TextContent | ImageContent;
 export interface ToolDefinition {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  inputSchema: Record<string, unknown>;
 }
 
 // --- Messages (LLM-level) ---
@@ -40,7 +44,7 @@ export interface UserMessage {
 }
 
 export interface ToolCallBlock {
-  type: "tool_use";
+  type: "tool_call";
   id: string;
   name: string;
   input: Record<string, unknown>;
@@ -65,9 +69,9 @@ export interface AssistantMessage {
 
 export interface ToolResultMessage {
   role: "tool_result";
-  tool_use_id: string;
+  toolCallId: string;
   content: string | ContentBlock[];
-  is_error?: boolean;
+  isError?: boolean;
 }
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;

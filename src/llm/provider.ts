@@ -92,9 +92,9 @@ export class AnthropicProvider implements LLMProvider {
           role: "user" as const,
           content: [{
             type: "tool_result" as const,
-            tool_use_id: m.tool_use_id,
+            tool_use_id: m.toolCallId,
             content: typeof m.content === "string" ? m.content : m.content.map(mapToolResultContent),
-            ...(m.is_error ? { is_error: true as const } : {}),
+            ...(m.isError ? { is_error: true as const } : {}),
           }],
         };
       }),
@@ -103,7 +103,7 @@ export class AnthropicProvider implements LLMProvider {
         tools: tools.map((t) => ({
           name: t.name,
           description: t.description,
-          input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+          input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
         })),
       } : {}),
       ...(thinkingBudget ? {
@@ -124,7 +124,7 @@ export class AnthropicProvider implements LLMProvider {
           if (block.type === "text") {
             contentBlocks.push({ type: "text", text: "" });
           } else if (block.type === "tool_use") {
-            contentBlocks.push({ type: "tool_use", id: block.id, name: block.name, input: {} });
+            contentBlocks.push({ type: "tool_call", id: block.id, name: block.name, input: {} });
             toolInputBuffers.set(event.index, "");
             yield { type: "tool_call_start", id: block.id, name: block.name };
           } else if (block.type === "thinking") {
@@ -142,7 +142,7 @@ export class AnthropicProvider implements LLMProvider {
             const buf = (toolInputBuffers.get(event.index) ?? "") + delta.partial_json;
             toolInputBuffers.set(event.index, buf);
             const block = contentBlocks[event.index];
-            if (block && block.type === "tool_use") {
+            if (block && block.type === "tool_call") {
               yield { type: "tool_call_delta", id: block.id, input: delta.partial_json };
             }
           } else if (delta.type === "thinking_delta") {
@@ -155,7 +155,7 @@ export class AnthropicProvider implements LLMProvider {
         } else if (event.type === "content_block_stop") {
           // Parse accumulated tool input JSON
           const block = contentBlocks[event.index];
-          if (block && block.type === "tool_use") {
+          if (block && block.type === "tool_call") {
             const buf = toolInputBuffers.get(event.index) ?? "{}";
             try {
               block.input = JSON.parse(buf || "{}");
@@ -197,7 +197,7 @@ function mapToolResultContent(block: { type: string; [key: string]: any }): Anth
   if (block.type === "image" && block.source?.type === "base64") {
     return {
       type: "image",
-      source: { type: "base64", media_type: block.source.media_type, data: block.source.data },
+      source: { type: "base64", media_type: block.source.mediaType, data: block.source.data },
     };
   }
   if (block.type === "image" && block.source?.type === "url") {
@@ -214,7 +214,7 @@ function mapContentBlock(block: { type: string; [key: string]: any }): Anthropic
     if (block.source.type === "base64") {
       return {
         type: "image",
-        source: { type: "base64", media_type: block.source.media_type, data: block.source.data },
+        source: { type: "base64", media_type: block.source.mediaType, data: block.source.data },
       };
     }
     return { type: "image", source: { type: "url", url: block.source.url } };
@@ -226,7 +226,7 @@ function mapAssistantBlock(block: AssistantContentBlock): Anthropic.ContentBlock
   if (block.type === "text") {
     return { type: "text", text: block.text };
   }
-  if (block.type === "tool_use") {
+  if (block.type === "tool_call") {
     return { type: "tool_use", id: block.id, name: block.name, input: block.input };
   }
   if (block.type === "thinking") {
