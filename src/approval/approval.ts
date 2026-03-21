@@ -1,4 +1,4 @@
-// Queue-based approval system (from Kimi)
+// Queue-based approval system
 
 import { generateId } from "../utils/id.js";
 import type { Approval, ApprovalConfig, ApprovalRequest, ApprovalResponse } from "./types.js";

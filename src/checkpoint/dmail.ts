@@ -1,4 +1,4 @@
-// DenwaRenji — D-Mail state machine (from Kimi, adapted to tree sessions)
+// DenwaRenji — D-Mail state machine
 
 import type { DMail } from "./types.js";
 

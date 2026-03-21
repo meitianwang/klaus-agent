@@ -99,13 +99,6 @@ const result = await agent.prompt("Help me outline a mystery novel");
 
 ## Architecture / 架构
 
-Inspired by [Kimi](https://github.com/anthropics/kimi) and [Pi-Momo](https://github.com/anthropics/pi-momo), taking the best from both:
-
-借鉴了 Kimi 和 Pi-Momo 两个项目的优点：
-
-- From Kimi / 来自 Kimi: multi-agent orchestration, D-Mail, approval system, MCP integration
-- From Pi-Momo / 来自 Pi-Momo: agent loop pattern, tree-based sessions, extension system, parallel tool execution
-
 Key design decision: single package with all capabilities built-in. No need to build a `coding-agent` wrapper — the runtime is complete.
 
 核心设计决策：单包内置所有能力。不需要再包一层 `coding-agent`，runtime 本身就是完整的。

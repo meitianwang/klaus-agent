@@ -1,5 +1,5 @@
 node_modules
 dist
-kimi
-pi-momo
 *.tsbuildinfo
+pi-momo/
+kimi/
