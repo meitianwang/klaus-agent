@@ -1,0 +1,5 @@
+node_modules
+dist
+kimi
+pi-momo
+*.tsbuildinfo
