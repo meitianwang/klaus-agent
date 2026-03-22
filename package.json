@@ -1,5 +1,5 @@
 {
-  "name": "@klaus/agent",
+  "name": "@klaus-ai/agent",
   "version": "0.1.0",
   "description": "Universal agent framework",
   "type": "module",

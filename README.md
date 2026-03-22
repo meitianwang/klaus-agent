@@ -1,4 +1,4 @@
-# @klaus/agent
+# @klaus-ai/agent
 
 Universal agent framework SDK. Inject tools, skills, and systemPrompt to build your agent — no wrapper needed.
 
@@ -7,13 +7,13 @@ Universal agent framework SDK. Inject tools, skills, and systemPrompt to build y
 ## Install
 
 ```bash
-npm install @klaus/agent
+npm install @klaus-ai/agent
 ```
 
 ## Quick Start
 
 ```typescript
-import { createAgent } from "@klaus/agent";
+import { createAgent } from "@klaus-ai/agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({
@@ -109,7 +109,7 @@ await agent.dispose();
 Provider-agnostic abstraction. Built-in Anthropic provider with streaming, retry (3 attempts, exponential backoff), and extended thinking support.
 
 ```typescript
-import { registerProvider, resolveProvider } from "@klaus/agent";
+import { registerProvider, resolveProvider } from "@klaus-ai/agent";
 
 // Register a custom provider
 registerProvider("openai", (config) => new MyOpenAIProvider(config.apiKey));
@@ -164,7 +164,7 @@ Tools use TypeBox schemas for parameter validation. The executor supports sequen
 
 ```typescript
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@klaus/agent";
+import type { AgentTool } from "@klaus-ai/agent";
 
 const readFile: AgentTool = {
   name: "read_file",
@@ -358,7 +358,7 @@ Subagents share the parent's approval state (yolo, autoApproveActions) but have 
 Event-driven plugin system with 18 event types across agent lifecycle, tool execution, LLM requests, context, compaction, session, and background tasks.
 
 ```typescript
-import type { ExtensionFactory } from "@klaus/agent";
+import type { ExtensionFactory } from "@klaus-ai/agent";
 
 const myExtension: ExtensionFactory = (api) => {
   // Register event handlers
@@ -571,7 +571,7 @@ agent.subscribe((event) => {
 ## Full Example
 
 ```typescript
-import { createAgent } from "@klaus/agent";
+import { createAgent } from "@klaus-ai/agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({
