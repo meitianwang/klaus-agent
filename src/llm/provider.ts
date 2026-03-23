@@ -1,11 +1,27 @@
 // LLM provider registry
 
 import { AnthropicProvider } from "../providers/anthropic.js";
+import { OpenAIProvider } from "../providers/openai.js";
+import { GeminiProvider } from "../providers/google.js";
+import { MiniMaxProvider } from "../providers/minimax.js";
+import { KimiProvider } from "../providers/kimi.js";
+import { VolcengineProvider } from "../providers/volcengine.js";
 import type { LLMProvider, LLMProviderFactory } from "./types.js";
 
 const providers = new Map<string, LLMProviderFactory>();
 
-providers.set("anthropic", (config) => new AnthropicProvider(config.apiKey, config.baseUrl));
+// Built-in providers
+providers.set("anthropic", (c) => new AnthropicProvider(c.apiKey, c.baseUrl));
+providers.set("openai", (c) => new OpenAIProvider(c.apiKey, c.baseUrl));
+providers.set("google", (c) => new GeminiProvider(c.apiKey, c.baseUrl));
+providers.set("minimax", (c) => new MiniMaxProvider(c.apiKey, c.baseUrl));
+providers.set("kimi", (c) => new KimiProvider(c.apiKey, c.baseUrl));
+providers.set("volcengine", (c) => new VolcengineProvider(c.apiKey, c.baseUrl));
+
+// Protocol-compatible proxies — user provides baseUrl to connect any compatible service
+providers.set("openai-compatible", (c) => new OpenAIProvider(c.apiKey, c.baseUrl));
+providers.set("anthropic-compatible", (c) => new AnthropicProvider(c.apiKey, c.baseUrl));
+providers.set("gemini-compatible", (c) => new GeminiProvider(c.apiKey, c.baseUrl));
 
 export function registerProvider(name: string, factory: LLMProviderFactory): void {
   providers.set(name, factory);
