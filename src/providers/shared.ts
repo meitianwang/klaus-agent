@@ -59,3 +59,11 @@ export function mapThinkingBudget(level?: ThinkingLevel): number | undefined {
   };
   return budgets[level];
 }
+
+/** Maps ThinkingLevel to OpenAI reasoning_effort (shared by OpenAI and OpenAI Responses). */
+export function mapReasoningEffort(level?: ThinkingLevel): "low" | "medium" | "high" | undefined {
+  if (!level || level === "off") return undefined;
+  if (level === "minimal" || level === "low") return "low";
+  if (level === "medium") return "medium";
+  return "high";
+}

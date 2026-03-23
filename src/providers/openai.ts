@@ -11,14 +11,7 @@ import type {
   ThinkingLevel,
   Message,
 } from "../llm/types.js";
-import { withRetry, RETRYABLE_PATTERNS } from "./shared.js";
-
-function mapReasoningEffort(level?: ThinkingLevel): "low" | "medium" | "high" | undefined {
-  if (!level || level === "off") return undefined;
-  if (level === "minimal" || level === "low") return "low";
-  if (level === "medium") return "medium";
-  return "high";
-}
+import { withRetry, RETRYABLE_PATTERNS, mapReasoningEffort } from "./shared.js";
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;

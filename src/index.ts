@@ -80,6 +80,7 @@ export { ApprovalImpl } from "./approval/approval.js";
 export { registerProvider, resolveProvider } from "./llm/provider.js";
 export { AnthropicProvider } from "./providers/anthropic.js";
 export { OpenAIProvider } from "./providers/openai.js";
+export { OpenAIResponsesProvider } from "./providers/openai-responses.js";
 export { GeminiProvider } from "./providers/google.js";
 export { MiniMaxProvider } from "./providers/minimax.js";
 export { KimiProvider } from "./providers/kimi.js";
