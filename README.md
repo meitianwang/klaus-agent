@@ -2,7 +2,7 @@
 
 Universal agent framework SDK. Inject tools, skills, and systemPrompt to build your agent — no wrapper needed.
 
-通用 Agent 框架 SDK。注入 tools、skills、systemPrompt 即可构建 agent，无需再包一层。
+[中文文档](./README.zh-CN.md)
 
 ## Install
 
@@ -46,8 +46,6 @@ const messages = await agent.prompt("Say hello");
 ## Architecture
 
 Single package, 14 modules, zero wrappers. All capabilities are built-in and opt-in via config.
-
-单包架构，14 个模块，零包装层。所有能力内置，通过 config 按需启用。
 
 ```
 src/
