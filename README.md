@@ -51,7 +51,7 @@ Single package, 14 modules, zero wrappers. All capabilities are built-in and opt
 src/
 ├── core/           Agent + AgentLoop (nested dual-loop runtime)
 ├── llm/            Provider registry + abstraction
-├── providers/      7 built-in providers (Anthropic, OpenAI, OpenAI Codex, Gemini, MiniMax, Kimi, Volcengine)
+├── providers/      5 built-in protocol providers (Anthropic, OpenAI, OpenAI Responses, OpenAI Codex, Gemini)
 ├── tools/          Tool executor (sequential/parallel) + MCP adapter
 ├── approval/       Queue-based approval system
 ├── session/        JSONL tree persistence with branching
@@ -105,11 +105,9 @@ await agent.dispose();
 
 ### LLM Provider
 
-Provider-agnostic abstraction with 7 built-in providers and 3 protocol-compatible proxy modes. All providers support streaming, retry (3 attempts, exponential backoff), and extended thinking.
+Provider-agnostic abstraction with 5 built-in protocol providers. All providers support streaming, retry (3 attempts, exponential backoff), and extended thinking. Connect any compatible service by providing a custom `baseUrl`.
 
-Built-in providers: `anthropic`, `openai`, `openai-codex`, `google`, `minimax`, `kimi`, `volcengine`
-
-Protocol-compatible proxies: `openai-compatible`, `anthropic-compatible`, `gemini-compatible` — connect any compatible service by providing a `baseUrl`.
+Built-in providers: `anthropic`, `openai`, `openai-responses`, `openai-codex`, `google`
 
 ```typescript
 // Use any built-in provider
@@ -118,9 +116,9 @@ const agent = createAgent({
   ...
 });
 
-// Or connect a compatible service via proxy mode
+// Connect a compatible service via custom baseUrl
 const agent2 = createAgent({
-  model: { provider: "openai-compatible", model: "my-model", maxContextTokens: 128000, baseUrl: "https://my-service/v1" },
+  model: { provider: "openai", model: "my-model", maxContextTokens: 128000, baseUrl: "https://my-service/v1" },
   ...
 });
 
