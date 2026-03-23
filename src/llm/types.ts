@@ -144,3 +144,5 @@ export interface LLMRequestOptions {
   maxTokens?: number;
   signal?: AbortSignal;
 }
+
+export type LLMProviderFactory = (config: { apiKey?: string; baseUrl?: string }) => LLMProvider;

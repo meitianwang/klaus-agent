@@ -22,12 +22,14 @@ import type {
 } from "./types.js";
 import type { AgentTool } from "../tools/types.js";
 import type { AgentMessage } from "../types.js";
+import type { LLMProviderFactory } from "../llm/types.js";
 import type { TSchema } from "@sinclair/typebox";
 
 interface RegisteredExtension {
   handlers: Map<ExtensionEventType, ExtensionHandler<any>[]>;
   tools: AgentTool[];
   commands: Map<string, CommandHandler>;
+  providers: Map<string, LLMProviderFactory>;
 }
 
 export class ExtensionRunner {
@@ -40,6 +42,7 @@ export class ExtensionRunner {
         handlers: new Map(),
         tools: [],
         commands: new Map(),
+        providers: new Map(),
       };
 
       const api: ExtensionAPI = {
@@ -52,6 +55,9 @@ export class ExtensionRunner {
         },
         registerCommand: (name: string, handler: CommandHandler) => {
           ext.commands.set(name, handler);
+        },
+        registerProvider: (name: string, factory: LLMProviderFactory) => {
+          ext.providers.set(name, factory);
         },
         sendMessage: (message: AgentMessage) => {
           this._pendingMessages.push(message);
@@ -73,6 +79,16 @@ export class ExtensionRunner {
       if (handler) return handler;
     }
     return undefined;
+  }
+
+  getRegisteredProviders(): Map<string, LLMProviderFactory> {
+    const merged = new Map<string, LLMProviderFactory>();
+    for (const ext of this._extensions) {
+      for (const [name, factory] of ext.providers) {
+        merged.set(name, factory);
+      }
+    }
+    return merged;
   }
 
   drainPendingMessages(): AgentMessage[] {

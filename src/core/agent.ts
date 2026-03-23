@@ -289,6 +289,20 @@ export class Agent {
     if (this._config.extensions?.length) {
       this._extensionRunner = new ExtensionRunner();
       await this._extensionRunner.loadExtensions(this._config.extensions);
+
+      // Re-resolve provider if extensions registered one for the configured provider
+      const extProviders = this._extensionRunner.getRegisteredProviders();
+      const extFactory = extProviders.get(this._config.model.provider);
+      if (extFactory) {
+        try {
+          this._provider = extFactory({
+            apiKey: this._config.model.apiKey,
+            baseUrl: this._config.model.baseUrl,
+          });
+        } catch {
+          // Extension provider factory failed, keep the original provider
+        }
+      }
     }
 
     // Notify extensions of session start

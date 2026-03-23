@@ -78,6 +78,7 @@ export function createAgent(config: CreateAgentConfig): Agent {
 export { Agent } from "./core/agent.js";
 export { ApprovalImpl } from "./approval/approval.js";
 export { registerProvider, resolveProvider } from "./llm/provider.js";
+export { AnthropicProvider } from "./providers/anthropic.js";
 export { executeToolCalls } from "./tools/executor.js";
 export { SessionManager } from "./session/session-manager.js";
 export { buildSessionContext } from "./session/session-context-builder.js";
@@ -130,6 +131,7 @@ export type {
 // LLM types
 export type {
   LLMProvider,
+  LLMProviderFactory,
   LLMRequestOptions,
   AssistantMessage,
   AssistantMessageEvent,

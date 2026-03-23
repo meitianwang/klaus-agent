@@ -3,7 +3,7 @@
 import type { TSchema } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "../tools/types.js";
 import type { AgentMessage, ThinkingLevel } from "../types.js";
-import type { Message, ToolDefinition } from "../llm/types.js";
+import type { Message, ToolDefinition, LLMProviderFactory } from "../llm/types.js";
 
 // --- Extension factory ---
 
@@ -15,6 +15,7 @@ export interface ExtensionAPI {
   on<E extends ExtensionEventType>(event: E, handler: ExtensionHandler<E>): void;
   registerTool<TParams extends TSchema>(tool: AgentTool<TParams>): void;
   registerCommand(name: string, handler: CommandHandler): void;
+  registerProvider(name: string, factory: LLMProviderFactory): void;
   sendMessage(message: AgentMessage): void;
 }
 
