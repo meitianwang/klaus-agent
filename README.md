@@ -137,6 +137,26 @@ interface LLMProvider {
 // Stream events: text | tool_call_start | tool_call_delta | thinking | done | error
 ```
 
+Cost tracking — provide per-million-token pricing via `ModelConfig.cost`, and the agent automatically calculates actual dollar costs on each `message_end` event:
+
+```typescript
+const agent = createAgent({
+  model: {
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    maxContextTokens: 200000,
+    cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  },
+  ...
+});
+
+agent.subscribe((event) => {
+  if (event.type === "message_end" && event.usage?.cost) {
+    console.log(`Request cost: $${event.usage.cost.total.toFixed(6)}`);
+  }
+});
+```
+
 ### Canonical Message Format
 
 Provider-agnostic message types used throughout the framework:

@@ -135,6 +135,26 @@ interface LLMProvider {
 // 流式事件类型：text | tool_call_start | tool_call_delta | thinking | done | error
 ```
 
+成本追踪 — 通过 `ModelConfig.cost` 提供每百万 token 的单价，agent 会在每次 `message_end` 事件中自动计算实际成本：
+
+```typescript
+const agent = createAgent({
+  model: {
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    maxContextTokens: 200000,
+    cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  },
+  ...
+});
+
+agent.subscribe((event) => {
+  if (event.type === "message_end" && event.usage?.cost) {
+    console.log(`请求成本: $${event.usage.cost.total.toFixed(6)}`);
+  }
+});
+```
+
 ### 标准消息格式
 
 框架内部使用的 Provider 无关消息类型：
