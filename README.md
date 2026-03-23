@@ -51,7 +51,7 @@ Single package, 14 modules, zero wrappers. All capabilities are built-in and opt
 src/
 ├── core/           Agent + AgentLoop (nested dual-loop runtime)
 ├── llm/            Provider registry + abstraction
-├── providers/      6 built-in providers (Anthropic, OpenAI, Gemini, MiniMax, Kimi, Volcengine)
+├── providers/      7 built-in providers (Anthropic, OpenAI, OpenAI Codex, Gemini, MiniMax, Kimi, Volcengine)
 ├── tools/          Tool executor (sequential/parallel) + MCP adapter
 ├── approval/       Queue-based approval system
 ├── session/        JSONL tree persistence with branching
@@ -105,9 +105,9 @@ await agent.dispose();
 
 ### LLM Provider
 
-Provider-agnostic abstraction with 6 built-in providers and 3 protocol-compatible proxy modes. All providers support streaming, retry (3 attempts, exponential backoff), and extended thinking.
+Provider-agnostic abstraction with 7 built-in providers and 3 protocol-compatible proxy modes. All providers support streaming, retry (3 attempts, exponential backoff), and extended thinking.
 
-Built-in providers: `anthropic`, `openai`, `google`, `minimax`, `kimi`, `volcengine`
+Built-in providers: `anthropic`, `openai`, `openai-codex`, `google`, `minimax`, `kimi`, `volcengine`
 
 Protocol-compatible proxies: `openai-compatible`, `anthropic-compatible`, `gemini-compatible` — connect any compatible service by providing a `baseUrl`.
 

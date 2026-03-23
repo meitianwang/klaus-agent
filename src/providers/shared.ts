@@ -9,6 +9,7 @@ export const RETRYABLE_PATTERNS: Record<string, string[]> = {
   anthropic: [...COMMON_RETRYABLE, "rate_limit", "overloaded", "529"],
   openai: [...COMMON_RETRYABLE, "rate_limit"],
   google: [...COMMON_RETRYABLE],
+  codex: [...COMMON_RETRYABLE, "rate_limit", "usage_limit", "overloaded"],
 };
 
 export function isRetryableError(error: Error, patterns: string[]): boolean {

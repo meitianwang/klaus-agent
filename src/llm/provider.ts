@@ -2,6 +2,7 @@
 
 import { AnthropicProvider } from "../providers/anthropic.js";
 import { OpenAIProvider } from "../providers/openai.js";
+import { OpenAICodexProvider } from "../providers/openai-codex.js";
 import { GeminiProvider } from "../providers/google.js";
 import { MiniMaxProvider } from "../providers/minimax.js";
 import { KimiProvider } from "../providers/kimi.js";
@@ -13,6 +14,7 @@ const providers = new Map<string, LLMProviderFactory>();
 // Built-in providers
 providers.set("anthropic", (c) => new AnthropicProvider(c.apiKey, c.baseUrl));
 providers.set("openai", (c) => new OpenAIProvider(c.apiKey, c.baseUrl));
+providers.set("openai-codex", (c) => new OpenAICodexProvider(c.apiKey, c.baseUrl));
 providers.set("google", (c) => new GeminiProvider(c.apiKey, c.baseUrl));
 providers.set("minimax", (c) => new MiniMaxProvider(c.apiKey, c.baseUrl));
 providers.set("kimi", (c) => new KimiProvider(c.apiKey, c.baseUrl));

@@ -1,5 +1,6 @@
 export { AnthropicProvider } from "./anthropic.js";
 export { OpenAIProvider } from "./openai.js";
+export { OpenAICodexProvider } from "./openai-codex.js";
 export { GeminiProvider } from "./google.js";
 export { MiniMaxProvider } from "./minimax.js";
 export { KimiProvider } from "./kimi.js";

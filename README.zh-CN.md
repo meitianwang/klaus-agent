@@ -49,7 +49,7 @@ const messages = await agent.prompt("Say hello");
 src/
 ├── core/           Agent + AgentLoop（嵌套双循环运行时）
 ├── llm/            Provider 注册中心 + 抽象层
-├── providers/      6 个内置 Provider（Anthropic、OpenAI、Gemini、MiniMax、Kimi、Volcengine）
+├── providers/      7 个内置 Provider（Anthropic、OpenAI、OpenAI Codex、Gemini、MiniMax、Kimi、Volcengine）
 ├── tools/          工具执行器（顺序/并行）+ MCP 适配器
 ├── approval/       基于队列的审批系统
 ├── session/        JSONL 树形持久化，支持分支
@@ -103,9 +103,9 @@ await agent.dispose();
 
 ### LLM Provider
 
-Provider 无关的抽象层，内置 6 个 Provider 和 3 种协议兼容代理模式。所有 Provider 支持流式输出、重试（3 次，指数退避）和扩展思考。
+Provider 无关的抽象层，内置 7 个 Provider 和 3 种协议兼容代理模式。所有 Provider 支持流式输出、重试（3 次，指数退避）和扩展思考。
 
-内置 Provider：`anthropic`、`openai`、`google`、`minimax`、`kimi`、`volcengine`
+内置 Provider：`anthropic`、`openai`、`openai-codex`、`google`、`minimax`、`kimi`、`volcengine`
 
 协议兼容代理：`openai-compatible`、`anthropic-compatible`、`gemini-compatible` — 提供 `baseUrl` 即可接入任何兼容服务。
 
