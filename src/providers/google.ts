@@ -9,22 +9,10 @@ import type {
   AssistantMessage,
   AssistantContentBlock,
   TokenUsage,
-  ThinkingLevel,
   Message,
 } from "../llm/types.js";
 import { generateId } from "../utils/id.js";
-
-function mapThinkingBudget(level?: ThinkingLevel): number | undefined {
-  if (!level || level === "off") return undefined;
-  const budgets: Record<string, number> = {
-    minimal: 1024,
-    low: 4096,
-    medium: 10240,
-    high: 20480,
-    xhigh: 40960,
-  };
-  return budgets[level];
-}
+import { withRetry, RETRYABLE_PATTERNS, mapThinkingBudget } from "./shared.js";
 
 export class GeminiProvider implements LLMProvider {
   private client: GoogleGenerativeAI;
@@ -36,32 +24,7 @@ export class GeminiProvider implements LLMProvider {
   }
 
   async *stream(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
-    const maxRetries = 3;
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (attempt > 0) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-
-      try {
-        yield* this._streamOnce(options);
-        return;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-
-        const isRetryable = lastError.message.includes("429")
-          || lastError.message.includes("500")
-          || lastError.message.includes("503")
-          || lastError.message.includes("ECONNRESET");
-
-        if (!isRetryable || attempt === maxRetries) {
-          yield { type: "error", error: lastError };
-          return;
-        }
-      }
-    }
+    yield* withRetry(() => this._streamOnce(options), RETRYABLE_PATTERNS.google);
   }
 
   private async *_streamOnce(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
@@ -99,7 +62,6 @@ export class GeminiProvider implements LLMProvider {
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
     for await (const chunk of result.stream) {
-      // Text content
       const text = chunk.text?.();
       if (text) {
         if (contentBlocks.length === 0 || contentBlocks[contentBlocks.length - 1].type !== "text") {

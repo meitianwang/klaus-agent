@@ -11,6 +11,7 @@ import type {
   ThinkingLevel,
   Message,
 } from "../llm/types.js";
+import { withRetry, RETRYABLE_PATTERNS } from "./shared.js";
 
 function mapReasoningEffort(level?: ThinkingLevel): "low" | "medium" | "high" | undefined {
   if (!level || level === "off") return undefined;
@@ -30,33 +31,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async *stream(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
-    const maxRetries = 3;
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (attempt > 0) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
-        await new Promise((r) => setTimeout(r, delay));
-      }
-
-      try {
-        yield* this._streamOnce(options);
-        return;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-
-        const isRetryable = lastError.message.includes("rate_limit")
-          || lastError.message.includes("429")
-          || lastError.message.includes("500")
-          || lastError.message.includes("503")
-          || lastError.message.includes("ECONNRESET");
-
-        if (!isRetryable || attempt === maxRetries) {
-          yield { type: "error", error: lastError };
-          return;
-        }
-      }
-    }
+    yield* withRetry(() => this._streamOnce(options), RETRYABLE_PATTERNS.openai);
   }
 
   private async *_streamOnce(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
@@ -94,7 +69,7 @@ export class OpenAIProvider implements LLMProvider {
       if (choice?.delta) {
         const delta = choice.delta;
 
-        // Text content
+        // Text
         if (delta.content) {
           if (contentBlocks.length === 0 || contentBlocks[contentBlocks.length - 1].type !== "text") {
             contentBlocks.push({ type: "text", text: "" });
@@ -193,19 +168,22 @@ function mapMessage(m: Message): OpenAI.ChatCompletionMessageParam {
   }
 
   if (m.role === "assistant") {
-    const textParts = m.content.filter((b) => b.type === "text").map((b) => b.type === "text" ? b.text : "");
-    const toolCallBlocks = m.content.filter((b) => b.type === "tool_call");
-    const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = toolCallBlocks.map((b) => {
-      if (b.type !== "tool_call") throw new Error("unreachable");
-      return {
-        id: b.id,
-        type: "function" as const,
-        function: { name: b.name, arguments: JSON.stringify(b.input) },
-      };
-    });
+    let text = "";
+    const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
+    for (const b of m.content) {
+      if (b.type === "text") {
+        text += b.text;
+      } else if (b.type === "tool_call") {
+        toolCalls.push({
+          id: b.id,
+          type: "function" as const,
+          function: { name: b.name, arguments: JSON.stringify(b.input) },
+        });
+      }
+    }
     return {
       role: "assistant",
-      content: textParts.join("") || null,
+      content: text || null,
       ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
     };
   }
