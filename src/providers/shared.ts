@@ -1,6 +1,6 @@
 // Shared streaming utilities for LLM providers
 
-import type { AssistantMessageEvent, ThinkingLevel } from "../llm/types.js";
+import type { AssistantMessageEvent, ModelCost, TokenUsage, ThinkingLevel, UsageCost } from "../llm/types.js";
 
 // Retryable error patterns common across providers
 const COMMON_RETRYABLE = ["429", "500", "503", "ECONNRESET"];
@@ -66,4 +66,14 @@ export function mapReasoningEffort(level?: ThinkingLevel): "low" | "medium" | "h
   if (level === "minimal" || level === "low") return "low";
   if (level === "medium") return "medium";
   return "high";
+}
+
+/** Calculate actual dollar cost from token counts and per-million-token pricing. */
+export function calculateCost(cost: ModelCost | undefined, usage: TokenUsage): UsageCost | undefined {
+  if (!cost) return undefined;
+  const input = (cost.input / 1_000_000) * usage.inputTokens;
+  const output = (cost.output / 1_000_000) * usage.outputTokens;
+  const cacheRead = ((cost.cacheRead ?? 0) / 1_000_000) * (usage.cacheReadTokens ?? 0);
+  const cacheWrite = ((cost.cacheWrite ?? 0) / 1_000_000) * (usage.cacheWriteTokens ?? 0);
+  return { input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite };
 }

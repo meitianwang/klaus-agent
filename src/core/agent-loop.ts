@@ -12,6 +12,7 @@ import type {
   TokenUsage,
   UserMessage,
   ThinkingLevel,
+  ModelCost,
 } from "../types.js";
 import type { AgentTool } from "../tools/types.js";
 import type { LLMProvider, LLMRequestOptions, ToolDefinition, AssistantMessageEvent } from "../llm/types.js";
@@ -24,6 +25,7 @@ import type { CompactionConfig } from "../compaction/types.js";
 import { executeToolCalls, type ToolCallResult } from "../tools/executor.js";
 import { estimateTokens, shouldCompact, findCutPoint } from "../compaction/compaction.js";
 import { normalizeHistory } from "../injection/history-normalizer.js";
+import { calculateCost } from "../providers/shared.js";
 
 export interface AgentLoopConfig {
   provider: LLMProvider;
@@ -48,6 +50,7 @@ export interface AgentLoopConfig {
   injectionManager?: InjectionManager;
   extensionRunner?: ExtensionRunner;
   compaction?: CompactionConfig & { summarize?: (messages: AgentMessage[]) => Promise<string> };
+  modelCost?: ModelCost;
 }
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
@@ -284,7 +287,9 @@ export async function runAgentLoop(
           if (event.type === "done") {
             assistantMessage = event.message;
             usage = event.usage;
-            onEvent({ type: "message_end", message: event.message, usage: event.usage });
+            const cost = calculateCost(config.modelCost, event.usage);
+            if (cost) usage.cost = cost;
+            onEvent({ type: "message_end", message: event.message, usage });
             await extensionRunner?.emitSimple("message_end", { message: event.message });
           } else if (event.type === "error") {
             onEvent({ type: "error", error: event.error });

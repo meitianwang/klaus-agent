@@ -96,6 +96,7 @@ export { discoverSkills } from "./skills/discovery.js";
 export { loadSkill, renderSkillTemplate } from "./skills/loader.js";
 export { MCPAdapter } from "./tools/mcp-adapter.js";
 export { estimateTokens, shouldCompact, findCutPoint } from "./compaction/compaction.js";
+export { calculateCost } from "./providers/shared.js";
 export { LLMSummarizer } from "./compaction/summarizer.js";
 export { Wire } from "./wire/wire.js";
 export { BackgroundTaskManager } from "./background/task-manager.js";
@@ -142,6 +143,8 @@ export type {
   ToolResultMessage,
   Message,
   TokenUsage,
+  ModelCost,
+  UsageCost,
   ContentBlock,
   TextContent,
   ImageContent,

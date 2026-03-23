@@ -410,6 +410,7 @@ export class Agent {
         hooks: this._config.hooks,
         thinkingLevel: this._state.thinkingLevel,
         capabilities: this._state.model.capabilities,
+        modelCost: this._state.model.cost,
         signal: this._abortController.signal,
         getSteeringMessages: () => {
           const msgs = [...this._steeringQueue];

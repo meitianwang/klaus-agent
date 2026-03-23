@@ -1,5 +1,22 @@
 // LLM abstraction types
 
+/** Per-token pricing in $/million tokens. */
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+/** Calculated cost in actual dollars for a single request. */
+export interface UsageCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
 export interface ModelConfig {
   provider: string;
   model: string;
@@ -10,6 +27,7 @@ export interface ModelConfig {
     vision?: boolean;
     thinking?: boolean;
   };
+  cost?: ModelCost;
 }
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -84,6 +102,7 @@ export interface TokenUsage {
   totalTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  cost?: UsageCost;
 }
 
 // --- Streaming events ---
