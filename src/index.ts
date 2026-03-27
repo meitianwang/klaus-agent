@@ -15,6 +15,7 @@ import type { SubagentConfig } from "./multi-agent/types.js";
 import type { SkillSource } from "./skills/types.js";
 import type { MCPServerConfig, MCPClient } from "./tools/mcp-adapter.js";
 import type { TaskFactory } from "./background/types.js";
+import type { PlanningConfig } from "./planning/types.js";
 
 export interface CreateAgentConfig {
   // Required
@@ -41,6 +42,7 @@ export interface CreateAgentConfig {
   mcp?: { servers: MCPServerConfig[]; clientFactory: (config: MCPServerConfig) => MCPClient };
   wire?: { bufferSize?: number };
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
+  planning?: PlanningConfig;
 
   // Advanced: provide your own LLM provider
   provider?: LLMProvider;
@@ -71,6 +73,7 @@ export function createAgent(config: CreateAgentConfig): Agent {
     mcp: config.mcp,
     wire: config.wire,
     backgroundTasks: config.backgroundTasks,
+    planning: config.planning,
   });
 }
 
@@ -101,6 +104,9 @@ export { LLMSummarizer } from "./compaction/summarizer.js";
 export { Wire } from "./wire/wire.js";
 export { BackgroundTaskManager } from "./background/task-manager.js";
 export { createBackgroundTaskTools } from "./background/tools.js";
+export { PlanningManager } from "./planning/planning-manager.js";
+export { createPlanningTools } from "./planning/tools.js";
+export { PlanningNagProvider } from "./planning/nag-injection.js";
 
 // Core types
 export type {
@@ -227,3 +233,13 @@ export type {
   BackgroundTaskEvent,
   TaskFactory,
 } from "./background/types.js";
+
+// Planning types
+export type {
+  PlanningConfig,
+  PlanPhase,
+  TodoItem,
+  TodoStatus,
+} from "./planning/types.js";
+
+export { PLANNING_TOOL_NAMES } from "./planning/types.js";

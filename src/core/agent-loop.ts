@@ -22,6 +22,8 @@ import type { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import type { InjectionManager } from "../injection/injection-manager.js";
 import type { ExtensionRunner } from "../extensions/runner.js";
 import type { CompactionConfig } from "../compaction/types.js";
+import type { PlanningManager } from "../planning/planning-manager.js";
+import { PLANNING_TOOL_NAMES } from "../planning/types.js";
 import { executeToolCalls, type ToolCallResult } from "../tools/executor.js";
 import { estimateTokens, shouldCompact, findCutPoint } from "../compaction/compaction.js";
 import { normalizeHistory } from "../injection/history-normalizer.js";
@@ -50,6 +52,7 @@ export interface AgentLoopConfig {
   injectionManager?: InjectionManager;
   extensionRunner?: ExtensionRunner;
   compaction?: CompactionConfig & { summarize?: (messages: AgentMessage[]) => Promise<string> };
+  planningManager?: PlanningManager;
   modelCost?: ModelCost;
 }
 
@@ -248,8 +251,14 @@ export async function runAgentLoop(
           llmMessages = stripImages(llmMessages);
         }
 
+        // --- Phase-aware tool filtering ---
+        let visibleTools = allTools;
+        if (config.planningManager?.phase === "planning" && config.planningManager.allowedInPlanning.size > 2) {
+          visibleTools = allTools.filter((t) => config.planningManager!.allowedInPlanning.has(t.name));
+        }
+
         // --- Stream LLM response ---
-        const toolDefs = toolsToDefinitions(allTools);
+        const toolDefs = toolsToDefinitions(visibleTools);
         let requestOptions: LLMRequestOptions = {
           model: modelId,
           systemPrompt,
@@ -319,7 +328,7 @@ export async function runAgentLoop(
 
         if (toolCalls.length > 0) {
           const results = await executeToolCalls(toolCalls, {
-            tools: allTools,
+            tools: visibleTools,
             mode: config.toolExecution,
             approval: config.approval,
             agentName: config.agentName,
@@ -358,6 +367,14 @@ export async function runAgentLoop(
           // Persist tool results to session
           for (const rm of resultMessages) {
             await sessionManager?.appendMessage(rm);
+          }
+
+          // --- Planning: tick round counter (reset happens inside updateTodos when todo tool is called) ---
+          if (config.planningManager) {
+            const calledTodo = toolCalls.some((tc) => tc.name === PLANNING_TOOL_NAMES.todo);
+            if (!calledTodo) {
+              config.planningManager.tickRound();
+            }
           }
 
           hasMoreWork = true;

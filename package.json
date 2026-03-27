@@ -1,6 +1,6 @@
 {
   "name": "klaus-agent",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Universal agent framework",
   "type": "module",
   "main": "dist/index.js",

@@ -21,6 +21,7 @@ import type { SubagentConfig } from "../multi-agent/types.js";
 import type { SkillSource } from "../skills/types.js";
 import type { MCPServerConfig, MCPClient } from "../tools/mcp-adapter.js";
 import type { TaskFactory } from "../background/types.js";
+import type { PlanningConfig } from "../planning/types.js";
 import { SessionManager } from "../session/session-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import { InjectionManager } from "../injection/injection-manager.js";
@@ -35,6 +36,9 @@ import { LLMSummarizer, agentMessagesToCompactionInput } from "../compaction/sum
 import { Wire } from "../wire/wire.js";
 import { BackgroundTaskManager } from "../background/task-manager.js";
 import { createBackgroundTaskTools } from "../background/tools.js";
+import { PlanningManager } from "../planning/planning-manager.js";
+import { createPlanningTools } from "../planning/tools.js";
+import { PlanningNagProvider } from "../planning/nag-injection.js";
 import { runAgentLoop } from "./agent-loop.js";
 
 export interface AgentConfig {
@@ -60,6 +64,7 @@ export interface AgentConfig {
   mcp?: { servers: MCPServerConfig[]; clientFactory: (config: MCPServerConfig) => MCPClient };
   wire?: { bufferSize?: number };
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
+  planning?: PlanningConfig;
 }
 
 export class Agent {
@@ -83,6 +88,7 @@ export class Agent {
   private _mcpAdapter: MCPAdapter | undefined;
   private _wire: Wire;
   private _backgroundTaskManager: BackgroundTaskManager | undefined;
+  private _planningManager: PlanningManager | undefined;
   private _initialized = false;
 
   constructor(config: AgentConfig) {
@@ -144,6 +150,11 @@ export class Agent {
           this._extensionRunner?.emitSimple("task_failed", { taskId: task.id, taskName: task.name, error: taskEvent.error });
         }
       });
+    }
+
+    // Planning
+    if (config.planning) {
+      this._planningManager = new PlanningManager(config.planning);
     }
   }
 
@@ -236,6 +247,10 @@ export class Agent {
 
   get backgroundTasks(): BackgroundTaskManager | undefined {
     return this._backgroundTaskManager;
+  }
+
+  get planning(): PlanningManager | undefined {
+    return this._planningManager;
   }
 
   setSystemPrompt(prompt: string): void {
@@ -352,6 +367,19 @@ export class Agent {
       const bgTools = createBackgroundTaskTools(this._backgroundTaskManager, this._config.backgroundTasks?.factories);
       this._state.tools = [...this._state.tools, ...bgTools];
     }
+
+    // Planning tools + nag injection
+    if (this._planningManager) {
+      this._state.tools = [...this._state.tools, ...createPlanningTools(this._planningManager)];
+
+      // Register nag provider into injection manager (create one if needed)
+      const nagProvider = new PlanningNagProvider(this._planningManager);
+      if (this._injectionManager) {
+        this._injectionManager.addProvider(nagProvider);
+      } else {
+        this._injectionManager = new InjectionManager([nagProvider]);
+      }
+    }
   }
 
   private _normalizeInput(input: string | AgentMessage | AgentMessage[]): AgentMessage[] {
@@ -430,6 +458,7 @@ export class Agent {
         injectionManager: this._injectionManager,
         extensionRunner: this._extensionRunner,
         compaction: compactionWithSummarizer,
+        planningManager: this._planningManager,
       });
 
       this._state.messages = result;

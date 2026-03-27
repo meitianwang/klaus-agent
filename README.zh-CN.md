@@ -43,7 +43,7 @@ const messages = await agent.prompt("Say hello");
 
 ## 架构
 
-单包架构，14 个模块，零包装层。所有能力内置，通过 config 按需启用。
+单包架构，15 个模块，零包装层。所有能力内置，通过 config 按需启用。
 
 ```
 src/
@@ -61,6 +61,7 @@ src/
 ├── skills/         Markdown 技能发现 + 模板渲染
 ├── wire/           类型化异步事件通道，支持回放缓冲
 ├── background/     进程内异步任务管理器
+├── planning/       两阶段规划 + 结构化 todo + nag 注入
 └── utils/          ID 生成 + JSONL 工具
 ```
 
@@ -534,6 +535,38 @@ handle.abort();
 
 内置工具：`start_background_task`、`check_task_status`、`get_task_result`。
 
+### Planning（两阶段 Todo）
+
+可选的两阶段规划系统。结合结构化 todo 管理、阶段性工具访问控制和 nag 提醒。
+
+```typescript
+const agent = createAgent({
+  planning: {
+    readOnlyTools: ["read_file", "search"],  // 规划阶段可用的工具
+    nagAfterRounds: 3,                        // 连续 N 轮不更新 todo 后注入提醒
+    nagMessage: "<reminder>更新你的 todo。</reminder>",  // 自定义提醒文本
+    maxTodos: 50,                             // todo 数量上限（默认 50）
+  },
+  ...
+});
+
+// 访问规划状态
+console.log(agent.planning?.phase);  // "planning" | "executing"
+console.log(agent.planning?.todos);  // readonly TodoItem[]
+```
+
+**工作流：**
+
+1. Agent 启动后进入 **planning 阶段** — 只有 `readOnlyTools` + `todo` + `plan_mode` 工具可用
+2. LLM 使用 `todo` 工具创建结构化计划（同一时间只允许一个 `in_progress` 项）
+3. LLM 调用 `plan_mode({ action: "start_execution" })` 切换到 **execution 阶段**
+4. 执行阶段所有工具可用；如果 LLM 连续 3+ 轮不更新 todo，自动注入 `<reminder>`
+5. 随时可通过 `plan_mode({ action: "switch_to_planning" })` 切回规划阶段
+
+内置工具：`todo`、`plan_mode`。
+
+如果 `readOnlyTools` 未配置或为空，规划阶段所有工具仍可用（阶段分离仅通过工具描述建议模型遵守）。
+
 ### Hooks
 
 用户级 hook，用于转换上下文和拦截工具调用：
@@ -638,6 +671,7 @@ const agent = createAgent({
 
   wire: { bufferSize: 100 },
   backgroundTasks: { factories: { build: buildTaskFactory } },
+  planning: { readOnlyTools: ["read_file", "search"], nagAfterRounds: 3 },
 
   hooks: {
     transformContext: async (msgs) => msgs,
@@ -680,6 +714,7 @@ await agent.dispose();
 | `mcp` | `{ servers, clientFactory }` | 否 | — | MCP 服务器配置 |
 | `wire` | `{ bufferSize }` | 否 | `{ bufferSize: 0 }` | 事件通道配置 |
 | `backgroundTasks` | `{ factories }` | 否 | — | 后台任务工厂 |
+| `planning` | `PlanningConfig` | 否 | — | 两阶段规划，含 todo 管理和 nag 提醒 |
 | `provider` | `LLMProvider` | 否 | — | 自定义 LLM Provider（绕过注册中心） |
 
 ### `Agent` 实例
@@ -703,6 +738,7 @@ await agent.dispose();
 | `mcpAdapter` | `MCPAdapter`（需配置 MCP）。 |
 | `wire` | `Wire` 事件通道（始终可用）。 |
 | `backgroundTasks` | `BackgroundTaskManager`（需配置）。 |
+| `planning` | `PlanningManager`（需配置）。 |
 | `setSystemPrompt(prompt)` | 更新系统提示词。 |
 | `setModel(model)` | 更新模型配置。 |
 | `setTools(tools)` | 替换工具（运行中不可调用）。 |

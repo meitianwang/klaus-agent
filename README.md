@@ -45,7 +45,7 @@ const messages = await agent.prompt("Say hello");
 
 ## Architecture
 
-Single package, 14 modules, zero wrappers. All capabilities are built-in and opt-in via config.
+Single package, 15 modules, zero wrappers. All capabilities are built-in and opt-in via config.
 
 ```
 src/
@@ -63,6 +63,7 @@ src/
 ├── skills/         Markdown skill discovery + template rendering
 ├── wire/           Typed async event channel with replay buffer
 ├── background/     In-process async task manager
+├── planning/       Two-phase planning + structured todo + nag injection
 └── utils/          ID generation + JSONL helpers
 ```
 
@@ -536,6 +537,38 @@ handle.abort();
 
 Built-in tools: `start_background_task`, `check_task_status`, `get_task_result`.
 
+### Planning (Two-Phase Todo)
+
+Optional two-phase planning system inspired by [learn-claude-code](https://github.com/anthropics/learn-claude-code) s03 (TodoWrite) and pi-mono's plan-mode extension. Combines structured todo tracking with phase-gated tool access and nag reminders.
+
+```typescript
+const agent = createAgent({
+  planning: {
+    readOnlyTools: ["read_file", "search"],  // Tools available during planning phase
+    nagAfterRounds: 3,                        // Remind model to update todos after N rounds
+    nagMessage: "<reminder>Update todos.</reminder>",  // Custom nag text
+    maxTodos: 50,                             // Upper bound on todo items (default: 50)
+  },
+  ...
+});
+
+// Access planning state
+console.log(agent.planning?.phase);  // "planning" | "executing"
+console.log(agent.planning?.todos);  // readonly TodoItem[]
+```
+
+**Workflow:**
+
+1. Agent starts in **planning phase** — only `readOnlyTools` + `todo` + `plan_mode` tools are available
+2. The LLM uses the `todo` tool to create a structured plan (only one `in_progress` item allowed at a time)
+3. The LLM calls `plan_mode({ action: "start_execution" })` to switch to **execution phase**
+4. In execution phase, all tools are available; if the LLM goes 3+ rounds without updating todos, a `<reminder>` is automatically injected
+5. The LLM can switch back to planning at any time via `plan_mode({ action: "switch_to_planning" })`
+
+Built-in tools: `todo`, `plan_mode`.
+
+If `readOnlyTools` is omitted or empty, all tools remain available during planning (phase separation is advisory only via the tool descriptions).
+
 ### Hooks
 
 User-level hooks for transforming context and intercepting tool calls:
@@ -640,6 +673,7 @@ const agent = createAgent({
 
   wire: { bufferSize: 100 },
   backgroundTasks: { factories: { build: buildTaskFactory } },
+  planning: { readOnlyTools: ["read_file", "search"], nagAfterRounds: 3 },
 
   hooks: {
     transformContext: async (msgs) => msgs,
@@ -682,6 +716,7 @@ await agent.dispose();
 | `mcp` | `{ servers, clientFactory }` | no | — | MCP server configs |
 | `wire` | `{ bufferSize }` | no | `{ bufferSize: 0 }` | Event channel config |
 | `backgroundTasks` | `{ factories }` | no | — | Background task factories |
+| `planning` | `PlanningConfig` | no | — | Two-phase planning with todo tracking and nag reminders |
 | `provider` | `LLMProvider` | no | — | Custom LLM provider (bypasses registry) |
 
 ### `Agent` Instance
@@ -705,6 +740,7 @@ await agent.dispose();
 | `mcpAdapter` | `MCPAdapter` (if MCP configured). |
 | `wire` | `Wire` event channel (always available). |
 | `backgroundTasks` | `BackgroundTaskManager` (if configured). |
+| `planning` | `PlanningManager` (if configured). |
 | `setSystemPrompt(prompt)` | Update system prompt. |
 | `setModel(model)` | Update model config. |
 | `setTools(tools)` | Replace tools (not while running). |
