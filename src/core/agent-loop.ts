@@ -109,6 +109,7 @@ export async function runAgentLoop(
 
   // Mutable copies of config values that before_agent_start can override
   let { modelId, systemPrompt, thinkingLevel } = config;
+  const keepRecentToolResults = compaction?.keepRecentToolResults ?? 3;
 
   // --- before_agent_start: let extensions modify agent config ---
   if (extensionRunner) {
@@ -252,7 +253,6 @@ export async function runAgentLoop(
         }
 
         // --- Micro compaction: shorten old tool results ---
-        const keepRecentToolResults = config.compaction?.keepRecentToolResults ?? 3;
         llmMessages = microCompact(llmMessages, keepRecentToolResults);
 
         // --- Phase-aware tool filtering ---

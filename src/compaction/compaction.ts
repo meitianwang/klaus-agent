@@ -97,13 +97,8 @@ export function findCutPoint(
   return { firstKeptIndex: cutIndex, isSplitTurn };
 }
 
-/**
- * Micro compaction — silently replace old tool_result content with short placeholders.
- * Operates on a copy; does not mutate the input array.
- * Returns a new Message[] with old tool results shortened.
- */
+/** Replace old tool_result content with `[Previous: used {toolName}]`, keeping the most recent N intact. */
 export function microCompact(messages: Message[], keepRecent: number): Message[] {
-  // Collect indices of all tool_result messages
   const toolResultIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === "tool_result") {
@@ -111,7 +106,6 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
     }
   }
 
-  // Nothing to compact
   if (toolResultIndices.length <= keepRecent) return messages;
 
   const toReplace = toolResultIndices.slice(0, -keepRecent);
@@ -120,7 +114,6 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
   for (const idx of toReplace) {
     const msg = result[idx] as ToolResultMessage;
 
-    // Find tool name from preceding assistant message's tool_call block
     let toolName = "tool";
     for (let j = idx - 1; j >= 0; j--) {
       const prev = result[j];
@@ -128,8 +121,10 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
         const call = prev.content.find(
           (b): b is ToolCallBlock => b.type === "tool_call" && b.id === msg.toolCallId,
         );
-        if (call) toolName = call.name;
-        break;
+        if (call) {
+          toolName = call.name;
+          break;
+        }
       }
     }
 
@@ -137,7 +132,7 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
       role: "tool_result",
       toolCallId: msg.toolCallId,
       content: `[Previous: used ${toolName}]`,
-      isError: msg.isError,
+      ...(msg.isError && { isError: msg.isError }),
     };
   }
 
