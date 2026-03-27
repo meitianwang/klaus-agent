@@ -1,17 +1,17 @@
-# @klaus-ai/agent
+# klaus-agent
 
 通用 Agent 框架 SDK。注入 tools、skills、systemPrompt 即可构建 agent，无需再包一层。
 
 ## 安装
 
 ```bash
-npm install @klaus-ai/agent
+npm install klaus-agent
 ```
 
 ## 快速开始
 
 ```typescript
-import { createAgent } from "@klaus-ai/agent";
+import { createAgent } from "klaus-agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({
@@ -122,7 +122,7 @@ const agent2 = createAgent({
 });
 
 // 注册完全自定义的 Provider
-import { registerProvider } from "@klaus-ai/agent";
+import { registerProvider } from "klaus-agent";
 registerProvider("my-provider", (config) => new MyProvider(config.apiKey, config.baseUrl));
 ```
 
@@ -189,7 +189,7 @@ interface ToolResultMessage {
 
 ```typescript
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@klaus-ai/agent";
+import type { AgentTool } from "klaus-agent";
 
 const readFile: AgentTool = {
   name: "read_file",
@@ -383,7 +383,7 @@ agent.laborMarket.removeDynamic("analyst");
 事件驱动的插件系统，覆盖 Agent 生命周期、工具执行、LLM 请求、上下文、压缩、会话和后台任务共 18 种事件类型。
 
 ```typescript
-import type { ExtensionFactory } from "@klaus-ai/agent";
+import type { ExtensionFactory } from "klaus-agent";
 
 const myExtension: ExtensionFactory = (api) => {
   // 注册事件处理器
@@ -628,7 +628,7 @@ agent.subscribe((event) => {
 ## 完整示例
 
 ```typescript
-import { createAgent } from "@klaus-ai/agent";
+import { createAgent } from "klaus-agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({

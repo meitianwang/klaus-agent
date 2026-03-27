@@ -1,4 +1,4 @@
-# @klaus-ai/agent
+# klaus-agent
 
 Universal agent framework SDK. Inject tools, skills, and systemPrompt to build your agent — no wrapper needed.
 
@@ -7,13 +7,13 @@ Universal agent framework SDK. Inject tools, skills, and systemPrompt to build y
 ## Install
 
 ```bash
-npm install @klaus-ai/agent
+npm install klaus-agent
 ```
 
 ## Quick Start
 
 ```typescript
-import { createAgent } from "@klaus-ai/agent";
+import { createAgent } from "klaus-agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({
@@ -124,7 +124,7 @@ const agent2 = createAgent({
 });
 
 // Register a fully custom provider
-import { registerProvider } from "@klaus-ai/agent";
+import { registerProvider } from "klaus-agent";
 registerProvider("my-provider", (config) => new MyProvider(config.apiKey, config.baseUrl));
 ```
 
@@ -191,7 +191,7 @@ Tools use TypeBox schemas for parameter validation. The executor supports sequen
 
 ```typescript
 import { Type } from "@sinclair/typebox";
-import type { AgentTool } from "@klaus-ai/agent";
+import type { AgentTool } from "klaus-agent";
 
 const readFile: AgentTool = {
   name: "read_file",
@@ -385,7 +385,7 @@ Subagents share the parent's approval state (yolo, autoApproveActions) but have 
 Event-driven plugin system with 18 event types across agent lifecycle, tool execution, LLM requests, context, compaction, session, and background tasks.
 
 ```typescript
-import type { ExtensionFactory } from "@klaus-ai/agent";
+import type { ExtensionFactory } from "klaus-agent";
 
 const myExtension: ExtensionFactory = (api) => {
   // Register event handlers
@@ -630,7 +630,7 @@ agent.subscribe((event) => {
 ## Full Example
 
 ```typescript
-import { createAgent } from "@klaus-ai/agent";
+import { createAgent } from "klaus-agent";
 import { Type } from "@sinclair/typebox";
 
 const agent = createAgent({
