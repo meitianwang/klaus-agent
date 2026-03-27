@@ -6,6 +6,9 @@ export interface CompactionConfig {
   keepRecentTokens?: number;
   maxContextTokens?: number;
   customSummarizer?: CompactionSummarizer;
+
+  /** Number of recent tool results to keep intact during micro compaction. Default: 3. */
+  keepRecentToolResults?: number;
 }
 
 export interface CompactionSummarizer {

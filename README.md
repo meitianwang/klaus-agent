@@ -289,22 +289,25 @@ Session file format: first line is a header `{ type: "session", version: 1, id, 
 
 ### Compaction
 
-Automatic context compression when token count exceeds threshold.
+Two-layer context compression: micro compaction (silent, every turn) and auto compaction (LLM summarization on threshold).
 
 ```typescript
 const agent = createAgent({
   compaction: {
     enabled: true,
-    maxContextTokens: 200000,   // Defaults to model.maxContextTokens
-    reserveTokens: 16384,       // Reserve for output
-    keepRecentTokens: 20000,    // Keep recent messages
+    maxContextTokens: 200000,      // Defaults to model.maxContextTokens
+    reserveTokens: 16384,          // Reserve for output
+    keepRecentTokens: 20000,       // Keep recent messages during auto compaction
+    keepRecentToolResults: 3,      // Micro compaction: keep last N tool results intact (default: 3)
     customSummarizer: mySummarizer,  // Optional custom summarizer
   },
   ...
 });
 ```
 
-Flow: estimate tokens → check threshold → find cut point (respects tool_result boundaries) → summarize discarded messages via LLM → replace with `<compaction-summary>` → persist to session.
+**Micro compaction** (every turn): Old tool results beyond the most recent N are replaced with `[Previous: used {toolName}]` before each LLM call. No LLM cost, no persistent mutation — operates only on the context view.
+
+**Auto compaction** (on threshold): estimate tokens → check threshold → find cut point (respects tool_result boundaries) → summarize discarded messages via LLM → replace with `<compaction-summary>` → persist to session.
 
 Built-in `LLMSummarizer` uses the same provider to generate summaries. Supports incremental summarization with `previousSummary`.
 

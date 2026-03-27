@@ -1,6 +1,6 @@
 // Compaction logic — token estimation, cut point detection, shouldCompact
 
-import type { AgentMessage, Message } from "../types.js";
+import type { AgentMessage, Message, ToolResultMessage, ToolCallBlock } from "../types.js";
 import type { CutPointResult } from "./types.js";
 
 const CHARS_PER_TOKEN = 4;
@@ -95,6 +95,53 @@ export function findCutPoint(
     "role" in messages[cutIndex - 1]! && (messages[cutIndex - 1] as Message).role === "assistant";
 
   return { firstKeptIndex: cutIndex, isSplitTurn };
+}
+
+/**
+ * Micro compaction — silently replace old tool_result content with short placeholders.
+ * Operates on a copy; does not mutate the input array.
+ * Returns a new Message[] with old tool results shortened.
+ */
+export function microCompact(messages: Message[], keepRecent: number): Message[] {
+  // Collect indices of all tool_result messages
+  const toolResultIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "tool_result") {
+      toolResultIndices.push(i);
+    }
+  }
+
+  // Nothing to compact
+  if (toolResultIndices.length <= keepRecent) return messages;
+
+  const toReplace = toolResultIndices.slice(0, -keepRecent);
+  const result = [...messages];
+
+  for (const idx of toReplace) {
+    const msg = result[idx] as ToolResultMessage;
+
+    // Find tool name from preceding assistant message's tool_call block
+    let toolName = "tool";
+    for (let j = idx - 1; j >= 0; j--) {
+      const prev = result[j];
+      if (prev.role === "assistant") {
+        const call = prev.content.find(
+          (b): b is ToolCallBlock => b.type === "tool_call" && b.id === msg.toolCallId,
+        );
+        if (call) toolName = call.name;
+        break;
+      }
+    }
+
+    result[idx] = {
+      role: "tool_result",
+      toolCallId: msg.toolCallId,
+      content: `[Previous: used ${toolName}]`,
+      isError: msg.isError,
+    };
+  }
+
+  return result;
 }
 
 export function messagesToText(messages: AgentMessage[]): string {

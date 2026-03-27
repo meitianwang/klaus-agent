@@ -287,22 +287,25 @@ agent.session.branch(entryId);
 
 ### 压缩
 
-Token 数超过阈值时自动压缩上下文。
+两层上下文压缩：微压缩（静默，每轮执行）和自动压缩（LLM 摘要，阈值触发）。
 
 ```typescript
 const agent = createAgent({
   compaction: {
     enabled: true,
-    maxContextTokens: 200000,   // 默认使用 model.maxContextTokens
-    reserveTokens: 16384,       // 为输出预留的 token 数
-    keepRecentTokens: 20000,    // 保留最近消息的 token 数
+    maxContextTokens: 200000,      // 默认使用 model.maxContextTokens
+    reserveTokens: 16384,          // 为输出预留的 token 数
+    keepRecentTokens: 20000,       // 自动压缩时保留最近消息的 token 数
+    keepRecentToolResults: 3,      // 微压缩：保留最近 N 个工具结果（默认 3）
     customSummarizer: mySummarizer,  // 可选自定义摘要器
   },
   ...
 });
 ```
 
-流程：估算 token → 检查阈值 → 找到切割点（尊重 tool_result 边界）→ 通过 LLM 摘要被丢弃的消息 → 替换为 `<compaction-summary>` → 持久化到会话。
+**微压缩**（每轮）：每次 LLM 调用前，将最近 N 个以外的旧 tool_result 替换为 `[Previous: used {toolName}]`。无 LLM 开销，不修改持久化状态——仅作用于上下文视图。
+
+**自动压缩**（阈值触发）：估算 token → 检查阈值 → 找到切割点（尊重 tool_result 边界）→ 通过 LLM 摘要被丢弃的消息 → 替换为 `<compaction-summary>` → 持久化到会话。
 
 内置 `LLMSummarizer` 使用同一 Provider 生成摘要，支持基于 `previousSummary` 的增量摘要。
 

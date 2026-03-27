@@ -25,7 +25,7 @@ import type { CompactionConfig } from "../compaction/types.js";
 import type { PlanningManager } from "../planning/planning-manager.js";
 import { PLANNING_TOOL_NAMES } from "../planning/types.js";
 import { executeToolCalls, type ToolCallResult } from "../tools/executor.js";
-import { estimateTokens, shouldCompact, findCutPoint } from "../compaction/compaction.js";
+import { estimateTokens, shouldCompact, findCutPoint, microCompact } from "../compaction/compaction.js";
 import { normalizeHistory } from "../injection/history-normalizer.js";
 import { calculateCost } from "../providers/shared.js";
 
@@ -250,6 +250,10 @@ export async function runAgentLoop(
         if (config.capabilities?.vision === false) {
           llmMessages = stripImages(llmMessages);
         }
+
+        // --- Micro compaction: shorten old tool results ---
+        const keepRecentToolResults = config.compaction?.keepRecentToolResults ?? 3;
+        llmMessages = microCompact(llmMessages, keepRecentToolResults);
 
         // --- Phase-aware tool filtering ---
         let visibleTools = allTools;

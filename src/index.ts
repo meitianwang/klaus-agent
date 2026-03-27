@@ -98,7 +98,7 @@ export { ExtensionRunner } from "./extensions/runner.js";
 export { discoverSkills } from "./skills/discovery.js";
 export { loadSkill, renderSkillTemplate } from "./skills/loader.js";
 export { MCPAdapter } from "./tools/mcp-adapter.js";
-export { estimateTokens, shouldCompact, findCutPoint } from "./compaction/compaction.js";
+export { estimateTokens, shouldCompact, findCutPoint, microCompact } from "./compaction/compaction.js";
 export { calculateCost } from "./providers/shared.js";
 export { LLMSummarizer } from "./compaction/summarizer.js";
 export { Wire } from "./wire/wire.js";
