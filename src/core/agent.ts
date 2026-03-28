@@ -43,6 +43,7 @@ import { PlanningNagProvider } from "../planning/nag-injection.js";
 import { TaskGraph } from "../task-graph/task-graph.js";
 import { createTaskGraphTools } from "../task-graph/tools.js";
 import { TaskResultInjectionProvider } from "../task-graph/result-injection.js";
+import { resolveProvider } from "../llm/provider.js";
 import { runAgentLoop } from "./agent-loop.js";
 
 export interface AgentConfig {
@@ -296,6 +297,7 @@ export class Agent {
     this._followUpQueue = [];
     await Promise.allSettled(this._createdSubagents.map((sub) => sub.dispose()));
     this._createdSubagents = [];
+    this._approval.dispose();
     await this._mcpAdapter?.dispose();
     this._backgroundTaskManager?.dispose();
     this._taskGraph.dispose();
@@ -364,11 +366,13 @@ export class Agent {
     // Init fixed subagents and create TaskTool
     if (this._config.subagents && this._laborMarket && this._taskExecutor) {
       for (const [name, subConfig] of Object.entries(this._config.subagents)) {
+        const subModel = subConfig.model ?? this._config.model;
+        const subProvider = subConfig.model ? resolveProvider(subConfig.model) : this._provider;
         const subAgent = new Agent({
-          model: this._config.model,
+          model: subModel,
           systemPrompt: subConfig.systemPrompt,
           tools: subConfig.tools ?? [],
-          provider: this._provider,
+          provider: subProvider,
           approval: this._approval.share(),
           name,
         });

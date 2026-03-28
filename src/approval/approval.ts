@@ -101,4 +101,14 @@ export class ApprovalImpl implements Approval {
     // Shared state (yolo, autoApproveActions) via same reference, independent queue
     return new ApprovalImpl(undefined, this._shared);
   }
+
+  dispose(): void {
+    this.cancelPendingWaiters();
+    // Reject all pending approval requests so blocked tools don't hang forever
+    for (const [id, pending] of this._pending) {
+      pending.resolve(false);
+    }
+    this._pending.clear();
+    this._queue = [];
+  }
 }

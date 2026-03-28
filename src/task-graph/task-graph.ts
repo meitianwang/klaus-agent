@@ -23,11 +23,15 @@ export class TaskGraph {
 
   get(id: string): TaskNode | undefined {
     const task = this._tasks.get(id);
-    return task ? { ...task } : undefined;
+    return task ? { ...task, blockedBy: [...task.blockedBy], blocks: [...task.blocks] } : undefined;
   }
 
   listAll(): TaskNode[] {
-    return [...this._tasks.values()];
+    return [...this._tasks.values()].map((t) => ({
+      ...t,
+      blockedBy: [...t.blockedBy],
+      blocks: [...t.blocks],
+    }));
   }
 
   /** Tasks that are pending with no unfinished blockers. */
@@ -64,7 +68,7 @@ export class TaskGraph {
     };
     this._tasks.set(node.id, node);
     this._persist();
-    return { ...node };
+    return { ...node, blockedBy: [...node.blockedBy], blocks: [...node.blocks] };
   }
 
   /** Add a dependency: `taskId` is blocked by `blockedById`. */
@@ -116,7 +120,7 @@ export class TaskGraph {
     }
     task.updatedAt = Date.now();
     this._persist();
-    return { ...task };
+    return { ...task, blockedBy: [...task.blockedBy], blocks: [...task.blocks] };
   }
 
 

@@ -75,7 +75,10 @@ export function findCutPoint(
     }
   }
 
-  // If all messages fit within keepRecentTokens, nothing to discard
+  // If all messages fit within keepRecentTokens, nothing can be discarded.
+  // Return firstKeptIndex: 0 so callers know there's nothing to cut —
+  // this prevents infinite compaction loops when context exceeds max but
+  // all messages fall within the keep window.
   if (cutIndex >= messages.length) {
     return { firstKeptIndex: 0, isSplitTurn: false };
   }
@@ -90,8 +93,8 @@ export function findCutPoint(
     }
   }
 
-  // Don't cut if nothing to discard
-  if (cutIndex <= 1) {
+  // After adjusting for tool_results, check if we've pushed past all messages
+  if (cutIndex >= messages.length || cutIndex <= 1) {
     return { firstKeptIndex: 0, isSplitTurn: false };
   }
 
@@ -113,25 +116,24 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
 
   if (toolResultIndices.length <= keepRecent) return messages;
 
+  // Build toolCallId → toolName map in one pass
+  const toolCallNames = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role === "assistant") {
+      for (const b of msg.content) {
+        if (b.type === "tool_call") {
+          toolCallNames.set(b.id, b.name);
+        }
+      }
+    }
+  }
+
   const toReplace = toolResultIndices.slice(0, -keepRecent);
   const result = [...messages];
 
   for (const idx of toReplace) {
     const msg = result[idx] as ToolResultMessage;
-
-    let toolName = "tool";
-    for (let j = idx - 1; j >= 0; j--) {
-      const prev = result[j];
-      if (prev.role === "assistant") {
-        const call = prev.content.find(
-          (b): b is ToolCallBlock => b.type === "tool_call" && b.id === msg.toolCallId,
-        );
-        if (call) {
-          toolName = call.name;
-          break;
-        }
-      }
-    }
+    const toolName = toolCallNames.get(msg.toolCallId) ?? "tool";
 
     result[idx] = {
       role: "tool_result",

@@ -160,35 +160,29 @@ export class MCPAdapter {
         const callPromise = client.callTool(def.name, params);
         let result: MCPToolResult;
 
-        if (timeout || context.signal) {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          let abortHandler: (() => void) | undefined;
-          const racers: Promise<MCPToolResult>[] = [callPromise];
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let abortHandler: (() => void) | undefined;
+        const racers: Promise<MCPToolResult>[] = [callPromise];
 
-          if (timeout) {
-            racers.push(new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error(`MCP tool ${def.name} timed out after ${timeout}ms`)), timeout);
-            }));
-          }
+        if (timeout) {
+          racers.push(new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`MCP tool ${def.name} timed out after ${timeout}ms`)), timeout);
+          }));
+        }
 
-          if (context.signal) {
-            if (context.signal.aborted) throw new Error("Aborted");
-            racers.push(new Promise<never>((_, reject) => {
-              abortHandler = () => reject(new Error("Aborted"));
-              context.signal!.addEventListener("abort", abortHandler, { once: true });
-            }));
-          }
+        if (context.signal.aborted) throw new Error("Aborted");
+        racers.push(new Promise<never>((_, reject) => {
+          abortHandler = () => reject(new Error("Aborted"));
+          context.signal.addEventListener("abort", abortHandler, { once: true });
+        }));
 
-          try {
-            result = await Promise.race(racers);
-          } finally {
-            if (timer !== undefined) clearTimeout(timer);
-            if (abortHandler && context.signal) {
-              context.signal.removeEventListener("abort", abortHandler);
-            }
+        try {
+          result = await Promise.race(racers);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+          if (abortHandler) {
+            context.signal.removeEventListener("abort", abortHandler);
           }
-        } else {
-          result = await callPromise;
         }
 
         // Convert MCP result to AgentToolResult

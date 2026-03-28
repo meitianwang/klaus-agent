@@ -23,4 +23,5 @@ export interface Approval {
   isYolo(): boolean;
   readonly autoApproveActions: Set<string>;
   share(): Approval;
+  dispose(): void;
 }

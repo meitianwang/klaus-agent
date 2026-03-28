@@ -12,6 +12,11 @@ import type {
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapReasoningEffort } from "./shared.js";
 
+// OpenAI o1/o3 reasoning content not yet in published typings
+interface DeltaWithReasoning {
+  reasoning_content?: string;
+}
+
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
 
@@ -74,8 +79,9 @@ export class OpenAIProvider implements LLMProvider {
         }
 
         // Reasoning/thinking content (o1/o3 series)
-        if ((delta as any).reasoning_content) {
-          const thinking = (delta as any).reasoning_content as string;
+        const reasoningContent = (delta as unknown as DeltaWithReasoning).reasoning_content;
+        if (reasoningContent) {
+          const thinking = reasoningContent;
           if (contentBlocks.length === 0 || contentBlocks[contentBlocks.length - 1].type !== "thinking") {
             contentBlocks.push({ type: "thinking", thinking: "" });
           }

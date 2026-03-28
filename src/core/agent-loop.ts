@@ -185,14 +185,10 @@ export async function runAgentLoop(
                 }
                 allMessages.push(...toKeep);
 
-                // Persist compaction to session
-                // Append compaction entry as boundary marker, then re-append
-                // kept messages after it so buildSessionContext picks them up
+                // Persist compaction boundary marker to session.
+                // Kept messages are already in the session tree — only append the compaction entry.
                 if (sessionManager) {
                   await sessionManager.appendCompaction(summary, sessionManager.getLeafId() ?? "", tokens);
-                  for (const msg of toKeep) {
-                    await sessionManager.appendMessage(msg);
-                  }
                 }
 
                 onEvent({ type: "compaction_end", summary });

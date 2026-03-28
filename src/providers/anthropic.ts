@@ -11,6 +11,12 @@ import type {
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapThinkingBudget } from "./shared.js";
 
+// Anthropic SDK type extension not yet in published typings
+interface ContentBlockDeltaSignature {
+  type: "signature_delta";
+  signature: string;
+}
+
 export class AnthropicProvider implements LLMProvider {
   private client: Anthropic;
 
@@ -104,10 +110,11 @@ export class AnthropicProvider implements LLMProvider {
             block.thinking += delta.thinking;
           }
           yield { type: "thinking", thinking: delta.thinking };
-        } else if ((delta as any).type === "signature_delta") { // SDK types don't include signature_delta yet
+        } else if ((delta as unknown as ContentBlockDeltaSignature).type === "signature_delta") {
+          const sigDelta = delta as unknown as ContentBlockDeltaSignature;
           const block = contentBlocks[event.index];
           if (block && block.type === "thinking") {
-            block.signature = (block.signature ?? "") + (delta as any).signature;
+            block.signature = (block.signature ?? "") + sigDelta.signature;
           }
         }
       } else if (event.type === "content_block_stop") {
@@ -131,12 +138,13 @@ export class AnthropicProvider implements LLMProvider {
         }
       } else if (event.type === "message_start") {
         if (event.message.usage) {
+          const u = event.message.usage;
           usage = {
-            inputTokens: event.message.usage.input_tokens,
-            outputTokens: event.message.usage.output_tokens,
-            totalTokens: event.message.usage.input_tokens + event.message.usage.output_tokens,
-            cacheReadTokens: (event.message.usage as any).cache_read_input_tokens,
-            cacheWriteTokens: (event.message.usage as any).cache_creation_input_tokens,
+            inputTokens: u.input_tokens,
+            outputTokens: u.output_tokens,
+            totalTokens: u.input_tokens + u.output_tokens,
+            cacheReadTokens: u.cache_read_input_tokens ?? undefined,
+            cacheWriteTokens: u.cache_creation_input_tokens ?? undefined,
           };
         }
       }

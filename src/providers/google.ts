@@ -49,7 +49,7 @@ export class GeminiProvider implements LLMProvider {
           maxOutputTokens: maxTokens ?? 8192,
           ...(thinkingBudget ? {
             thinkingConfig: { thinkingBudget },
-          } as any : {}),
+          } as Record<string, unknown> : {}),
         },
       },
       this.baseUrl ? { baseUrl: this.baseUrl } : undefined,
