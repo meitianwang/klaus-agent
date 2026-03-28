@@ -45,7 +45,7 @@ const messages = await agent.prompt("Say hello");
 
 ## Architecture
 
-Single package, 15 modules, zero wrappers. All capabilities are built-in and opt-in via config.
+Single package, 16 modules, zero wrappers. All capabilities are built-in and opt-in via config.
 
 ```
 src/
@@ -64,6 +64,7 @@ src/
 ├── wire/           Typed async event channel with replay buffer
 ├── background/     In-process async task manager
 ├── planning/       Two-phase planning + structured todo + nag injection
+├── task-graph/     Dependency-aware task DAG + background execution + auto-injection
 └── utils/          ID generation + JSONL helpers
 ```
 
@@ -542,7 +543,7 @@ Built-in tools: `start_background_task`, `check_task_status`, `get_task_result`.
 
 ### Planning (Two-Phase Todo)
 
-Optional two-phase planning system inspired by [learn-claude-code](https://github.com/anthropics/learn-claude-code) s03 (TodoWrite) and pi-mono's plan-mode extension. Combines structured todo tracking with phase-gated tool access and nag reminders.
+Two-phase planning system with structured todo tracking, phase-gated tool access, and nag reminders.
 
 ```typescript
 const agent = createAgent({
@@ -571,6 +572,36 @@ console.log(agent.planning?.todos);  // readonly TodoItem[]
 Built-in tools: `todo`, `plan_mode`.
 
 If `readOnlyTools` is omitted or empty, all tools remain available during planning (phase separation is advisory only via the tool descriptions).
+
+### Task Graph (Dependency DAG)
+
+Built-in dependency-aware task graph with background execution and auto-injection of results. Always available, no configuration needed.
+
+```typescript
+const agent = createAgent({
+  taskGraph: {
+    persistDir: "./.tasks",       // Persist to disk (default: in-memory)
+    maxTasks: 100,                // Upper bound (default: 100)
+    autoInjectResults: true,      // Auto-push completed results (default: true)
+  },
+  ...
+});
+
+// Programmatic access
+const graph = agent.taskGraph;
+graph.runBackground(taskId, async (signal) => {
+  return "Parser built successfully";
+});
+```
+
+**Features:**
+
+- **Dependency DAG**: `blockedBy`/`blocks` edges with cycle detection. Completing a task auto-unblocks dependents
+- **Background execution**: `runBackground()` with `AbortSignal` support. Status auto-updates to completed/failed
+- **Auto-injection**: Completed results automatically injected as `<background-results>` before each LLM call
+- **Persistence**: Optional single-file JSON via `persistDir`
+
+Built-in tools: `task_create`, `task_depend`, `task_update`, `task_list`, `task_get`.
 
 ### Hooks
 
@@ -677,6 +708,7 @@ const agent = createAgent({
   wire: { bufferSize: 100 },
   backgroundTasks: { factories: { build: buildTaskFactory } },
   planning: { readOnlyTools: ["read_file", "search"], nagAfterRounds: 3 },
+  taskGraph: { persistDir: "./.tasks", autoInjectResults: true },
 
   hooks: {
     transformContext: async (msgs) => msgs,
@@ -720,6 +752,7 @@ await agent.dispose();
 | `wire` | `{ bufferSize }` | no | `{ bufferSize: 0 }` | Event channel config |
 | `backgroundTasks` | `{ factories }` | no | — | Background task factories |
 | `planning` | `PlanningConfig` | no | — | Two-phase planning with todo tracking and nag reminders |
+| `taskGraph` | `TaskGraphConfig` | no | `{}` | Fine-tune task graph (persistDir, maxTasks) — tools always registered |
 | `provider` | `LLMProvider` | no | — | Custom LLM provider (bypasses registry) |
 
 ### `Agent` Instance
@@ -744,6 +777,7 @@ await agent.dispose();
 | `wire` | `Wire` event channel (always available). |
 | `backgroundTasks` | `BackgroundTaskManager` (if configured). |
 | `planning` | `PlanningManager` (if configured). |
+| `taskGraph` | `TaskGraph` (always available). |
 | `setSystemPrompt(prompt)` | Update system prompt. |
 | `setModel(model)` | Update model config. |
 | `setTools(tools)` | Replace tools (not while running). |

@@ -16,6 +16,7 @@ import type { SkillSource } from "./skills/types.js";
 import type { MCPServerConfig, MCPClient } from "./tools/mcp-adapter.js";
 import type { TaskFactory } from "./background/types.js";
 import type { PlanningConfig } from "./planning/types.js";
+import type { TaskGraphConfig } from "./task-graph/types.js";
 
 export interface CreateAgentConfig {
   // Required
@@ -43,6 +44,7 @@ export interface CreateAgentConfig {
   wire?: { bufferSize?: number };
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
   planning?: PlanningConfig;
+  taskGraph?: TaskGraphConfig;
 
   // Advanced: provide your own LLM provider
   provider?: LLMProvider;
@@ -74,6 +76,7 @@ export function createAgent(config: CreateAgentConfig): Agent {
     wire: config.wire,
     backgroundTasks: config.backgroundTasks,
     planning: config.planning,
+    taskGraph: config.taskGraph,
   });
 }
 
@@ -107,6 +110,9 @@ export { createBackgroundTaskTools } from "./background/tools.js";
 export { PlanningManager } from "./planning/planning-manager.js";
 export { createPlanningTools } from "./planning/tools.js";
 export { PlanningNagProvider } from "./planning/nag-injection.js";
+export { TaskGraph } from "./task-graph/task-graph.js";
+export { createTaskGraphTools } from "./task-graph/tools.js";
+export { TaskResultInjectionProvider } from "./task-graph/result-injection.js";
 
 // Core types
 export type {
@@ -243,3 +249,12 @@ export type {
 } from "./planning/types.js";
 
 export { PLANNING_TOOL_NAMES } from "./planning/types.js";
+export { TASK_GRAPH_TOOL_NAMES } from "./task-graph/types.js";
+
+// Task graph types
+export type {
+  TaskGraphConfig,
+  TaskNode,
+  TaskStatus,
+  CompletedTaskResult,
+} from "./task-graph/types.js";

@@ -43,7 +43,7 @@ const messages = await agent.prompt("Say hello");
 
 ## 架构
 
-单包架构，15 个模块，零包装层。所有能力内置，通过 config 按需启用。
+单包架构，16 个模块，零包装层。所有能力内置，通过 config 按需启用。
 
 ```
 src/
@@ -62,6 +62,7 @@ src/
 ├── wire/           类型化异步事件通道，支持回放缓冲
 ├── background/     进程内异步任务管理器
 ├── planning/       两阶段规划 + 结构化 todo + nag 注入
+├── task-graph/     依赖感知的任务 DAG + 后台执行 + 自动注入
 └── utils/          ID 生成 + JSONL 工具
 ```
 
@@ -570,6 +571,36 @@ console.log(agent.planning?.todos);  // readonly TodoItem[]
 
 如果 `readOnlyTools` 未配置或为空，规划阶段所有工具仍可用（阶段分离仅通过工具描述建议模型遵守）。
 
+### 任务图（依赖 DAG）
+
+内置的依赖感知任务图，支持后台执行和结果自动注入。始终可用，无需配置。
+
+```typescript
+const agent = createAgent({
+  taskGraph: {
+    persistDir: "./.tasks",       // 持久化到磁盘（默认纯内存）
+    maxTasks: 100,                // 任务数上限（默认 100）
+    autoInjectResults: true,      // 自动推送完成结果（默认 true）
+  },
+  ...
+});
+
+// 编程接口
+const graph = agent.taskGraph;
+graph.runBackground(taskId, async (signal) => {
+  return "解析器构建完成";
+});
+```
+
+**功能：**
+
+- **依赖 DAG**：`blockedBy`/`blocks` 双向边 + 环检测。完成任务自动解锁后续任务
+- **后台执行**：`runBackground()` 支持 `AbortSignal`。状态自动更新为 completed/failed
+- **自动注入**：完成结果自动以 `<background-results>` 注入到下次 LLM 调用前
+- **持久化**：可选单文件 JSON，通过 `persistDir` 启用
+
+内置工具：`task_create`、`task_depend`、`task_update`、`task_list`、`task_get`。
+
 ### Hooks
 
 用户级 hook，用于转换上下文和拦截工具调用：
@@ -675,6 +706,7 @@ const agent = createAgent({
   wire: { bufferSize: 100 },
   backgroundTasks: { factories: { build: buildTaskFactory } },
   planning: { readOnlyTools: ["read_file", "search"], nagAfterRounds: 3 },
+  taskGraph: { persistDir: "./.tasks", autoInjectResults: true },
 
   hooks: {
     transformContext: async (msgs) => msgs,
@@ -718,6 +750,7 @@ await agent.dispose();
 | `wire` | `{ bufferSize }` | 否 | `{ bufferSize: 0 }` | 事件通道配置 |
 | `backgroundTasks` | `{ factories }` | 否 | — | 后台任务工厂 |
 | `planning` | `PlanningConfig` | 否 | — | 两阶段规划，含 todo 管理和 nag 提醒 |
+| `taskGraph` | `TaskGraphConfig` | 否 | `{}` | 微调任务图（persistDir, maxTasks）——工具始终注册 |
 | `provider` | `LLMProvider` | 否 | — | 自定义 LLM Provider（绕过注册中心） |
 
 ### `Agent` 实例
@@ -742,6 +775,7 @@ await agent.dispose();
 | `wire` | `Wire` 事件通道（始终可用）。 |
 | `backgroundTasks` | `BackgroundTaskManager`（需配置）。 |
 | `planning` | `PlanningManager`（需配置）。 |
+| `taskGraph` | `TaskGraph`（始终可用）。 |
 | `setSystemPrompt(prompt)` | 更新系统提示词。 |
 | `setModel(model)` | 更新模型配置。 |
 | `setTools(tools)` | 替换工具（运行中不可调用）。 |

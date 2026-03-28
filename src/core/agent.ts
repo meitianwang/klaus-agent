@@ -22,6 +22,7 @@ import type { SkillSource } from "../skills/types.js";
 import type { MCPServerConfig, MCPClient } from "../tools/mcp-adapter.js";
 import type { TaskFactory } from "../background/types.js";
 import type { PlanningConfig } from "../planning/types.js";
+import type { TaskGraphConfig } from "../task-graph/types.js";
 import { SessionManager } from "../session/session-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import { InjectionManager } from "../injection/injection-manager.js";
@@ -39,6 +40,9 @@ import { createBackgroundTaskTools } from "../background/tools.js";
 import { PlanningManager } from "../planning/planning-manager.js";
 import { createPlanningTools } from "../planning/tools.js";
 import { PlanningNagProvider } from "../planning/nag-injection.js";
+import { TaskGraph } from "../task-graph/task-graph.js";
+import { createTaskGraphTools } from "../task-graph/tools.js";
+import { TaskResultInjectionProvider } from "../task-graph/result-injection.js";
 import { runAgentLoop } from "./agent-loop.js";
 
 export interface AgentConfig {
@@ -64,6 +68,7 @@ export interface AgentConfig {
   mcp?: { servers: MCPServerConfig[]; clientFactory: (config: MCPServerConfig) => MCPClient };
   wire?: { bufferSize?: number };
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
+  taskGraph?: TaskGraphConfig;
   planning?: PlanningConfig;
 }
 
@@ -89,6 +94,7 @@ export class Agent {
   private _wire: Wire;
   private _backgroundTaskManager: BackgroundTaskManager | undefined;
   private _planningManager: PlanningManager | undefined;
+  private _taskGraph: TaskGraph;
   private _initialized = false;
 
   constructor(config: AgentConfig) {
@@ -156,6 +162,9 @@ export class Agent {
     if (config.planning) {
       this._planningManager = new PlanningManager(config.planning);
     }
+
+    // Task graph
+    this._taskGraph = new TaskGraph(config.taskGraph ?? {});
   }
 
   // --- Public API ---
@@ -253,6 +262,10 @@ export class Agent {
     return this._planningManager;
   }
 
+  get taskGraph(): TaskGraph {
+    return this._taskGraph;
+  }
+
   setSystemPrompt(prompt: string): void {
     this._state.systemPrompt = prompt;
   }
@@ -282,6 +295,7 @@ export class Agent {
     this._followUpQueue = [];
     await this._mcpAdapter?.dispose();
     this._backgroundTaskManager?.dispose();
+    this._taskGraph.dispose();
     this._wire.dispose();
   }
 
@@ -373,12 +387,21 @@ export class Agent {
       this._state.tools = [...this._state.tools, ...createPlanningTools(this._planningManager)];
 
       // Register nag provider into injection manager (create one if needed)
-      const nagProvider = new PlanningNagProvider(this._planningManager);
-      if (this._injectionManager) {
-        this._injectionManager.addProvider(nagProvider);
-      } else {
-        this._injectionManager = new InjectionManager([nagProvider]);
-      }
+      this._addInjectionProvider(new PlanningNagProvider(this._planningManager));
+    }
+
+    // Task graph tools + result auto-injection
+    this._state.tools = [...this._state.tools, ...createTaskGraphTools(this._taskGraph)];
+    if (this._config.taskGraph?.autoInjectResults !== false) {
+      this._addInjectionProvider(new TaskResultInjectionProvider(this._taskGraph));
+    }
+  }
+
+  private _addInjectionProvider(provider: DynamicInjectionProvider): void {
+    if (this._injectionManager) {
+      this._injectionManager.addProvider(provider);
+    } else {
+      this._injectionManager = new InjectionManager([provider]);
     }
   }
 
