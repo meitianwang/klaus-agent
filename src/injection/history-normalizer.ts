@@ -1,6 +1,6 @@
 // History normalizer — merge adjacent user messages
 
-import type { AgentMessage, Message } from "../types.js";
+import type { AgentMessage, Message, ContentBlock } from "../types.js";
 
 export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
   if (messages.length <= 1) return messages;
@@ -23,17 +23,27 @@ export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
       (prev as Message).role === "user"
     ) {
       const prevMsg = prev as Message & { role: "user" };
-      const prevText = typeof prevMsg.content === "string"
-        ? prevMsg.content
-        : prevMsg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-      const currentText = typeof current.content === "string"
-        ? current.content
-        : current.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
+      const prevBlocks = typeof prevMsg.content === "string"
+        ? [{ type: "text" as const, text: prevMsg.content }]
+        : prevMsg.content;
+      const currentBlocks = typeof current.content === "string"
+        ? [{ type: "text" as const, text: current.content }]
+        : current.content;
 
-      result[result.length - 1] = {
-        role: "user",
-        content: prevText + "\n" + currentText,
-      };
+      const merged: ContentBlock[] = [...prevBlocks, ...currentBlocks];
+
+      // Optimize: if all blocks are text, collapse to a single string
+      if (merged.every((b) => b.type === "text")) {
+        result[result.length - 1] = {
+          role: "user",
+          content: merged.map((b) => (b as { text: string }).text).join("\n"),
+        };
+      } else {
+        result[result.length - 1] = {
+          role: "user",
+          content: merged,
+        };
+      }
       continue;
     }
 

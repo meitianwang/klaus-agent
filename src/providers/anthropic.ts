@@ -72,70 +72,75 @@ export class AnthropicProvider implements LLMProvider {
     const stream = this.client.messages.stream(params, { signal });
 
     for await (const event of stream) {
-        if (event.type === "content_block_start") {
-          const block = event.content_block;
-          if (block.type === "text") {
-            contentBlocks.push({ type: "text", text: "" });
-          } else if (block.type === "tool_use") {
-            contentBlocks.push({ type: "tool_call", id: block.id, name: block.name, input: {} });
-            toolInputBuffers.set(event.index, "");
-            yield { type: "tool_call_start", id: block.id, name: block.name };
-          } else if (block.type === "thinking") {
-            contentBlocks.push({ type: "thinking", thinking: "" });
+      if (event.type === "content_block_start") {
+        const block = event.content_block;
+        if (block.type === "text") {
+          contentBlocks.push({ type: "text", text: "" });
+        } else if (block.type === "tool_use") {
+          contentBlocks.push({ type: "tool_call", id: block.id, name: block.name, input: {} });
+          toolInputBuffers.set(event.index, "");
+          yield { type: "tool_call_start", id: block.id, name: block.name };
+        } else if (block.type === "thinking") {
+          contentBlocks.push({ type: "thinking", thinking: "" });
+        }
+      } else if (event.type === "content_block_delta") {
+        const delta = event.delta;
+        if (delta.type === "text_delta") {
+          const block = contentBlocks[event.index];
+          if (block && block.type === "text") {
+            block.text += delta.text;
           }
-        } else if (event.type === "content_block_delta") {
-          const delta = event.delta;
-          if (delta.type === "text_delta") {
-            const block = contentBlocks[event.index];
-            if (block && block.type === "text") {
-              block.text += delta.text;
-            }
-            yield { type: "text", text: delta.text };
-          } else if (delta.type === "input_json_delta") {
-            const buf = (toolInputBuffers.get(event.index) ?? "") + delta.partial_json;
-            toolInputBuffers.set(event.index, buf);
-            const block = contentBlocks[event.index];
-            if (block && block.type === "tool_call") {
-              yield { type: "tool_call_delta", id: block.id, input: delta.partial_json };
-            }
-          } else if (delta.type === "thinking_delta") {
-            const block = contentBlocks[event.index];
-            if (block && block.type === "thinking") {
-              block.thinking += delta.thinking;
-            }
-            yield { type: "thinking", thinking: delta.thinking };
-          }
-        } else if (event.type === "content_block_stop") {
+          yield { type: "text", text: delta.text };
+        } else if (delta.type === "input_json_delta") {
+          const buf = (toolInputBuffers.get(event.index) ?? "") + delta.partial_json;
+          toolInputBuffers.set(event.index, buf);
           const block = contentBlocks[event.index];
           if (block && block.type === "tool_call") {
-            const buf = toolInputBuffers.get(event.index) ?? "{}";
-            try {
-              block.input = JSON.parse(buf || "{}");
-            } catch {
-              block.input = {};
-            }
-            toolInputBuffers.delete(event.index);
+            yield { type: "tool_call_delta", id: block.id, input: delta.partial_json };
           }
-        } else if (event.type === "message_delta") {
-          if (event.usage) {
-            usage = {
-              inputTokens: usage.inputTokens,
-              outputTokens: event.usage.output_tokens,
-              totalTokens: usage.inputTokens + event.usage.output_tokens,
-            };
+        } else if (delta.type === "thinking_delta") {
+          const block = contentBlocks[event.index];
+          if (block && block.type === "thinking") {
+            block.thinking += delta.thinking;
           }
-        } else if (event.type === "message_start") {
-          if (event.message.usage) {
-            usage = {
-              inputTokens: event.message.usage.input_tokens,
-              outputTokens: event.message.usage.output_tokens,
-              totalTokens: event.message.usage.input_tokens + event.message.usage.output_tokens,
-              cacheReadTokens: (event.message.usage as any).cache_read_input_tokens,
-              cacheWriteTokens: (event.message.usage as any).cache_creation_input_tokens,
-            };
+          yield { type: "thinking", thinking: delta.thinking };
+        } else if ((delta as any).type === "signature_delta") { // SDK types don't include signature_delta yet
+          const block = contentBlocks[event.index];
+          if (block && block.type === "thinking") {
+            block.signature = (block.signature ?? "") + (delta as any).signature;
           }
         }
+      } else if (event.type === "content_block_stop") {
+        const block = contentBlocks[event.index];
+        if (block && block.type === "tool_call") {
+          const buf = toolInputBuffers.get(event.index) ?? "{}";
+          try {
+            block.input = JSON.parse(buf || "{}");
+          } catch {
+            block.input = {};
+          }
+          toolInputBuffers.delete(event.index);
+        }
+      } else if (event.type === "message_delta") {
+        if (event.usage) {
+          usage = {
+            inputTokens: usage.inputTokens,
+            outputTokens: event.usage.output_tokens,
+            totalTokens: usage.inputTokens + event.usage.output_tokens,
+          };
+        }
+      } else if (event.type === "message_start") {
+        if (event.message.usage) {
+          usage = {
+            inputTokens: event.message.usage.input_tokens,
+            outputTokens: event.message.usage.output_tokens,
+            totalTokens: event.message.usage.input_tokens + event.message.usage.output_tokens,
+            cacheReadTokens: (event.message.usage as any).cache_read_input_tokens,
+            cacheWriteTokens: (event.message.usage as any).cache_creation_input_tokens,
+          };
+        }
       }
+    }
 
     const message: AssistantMessage = { role: "assistant", content: contentBlocks };
     yield { type: "done", message, usage };
@@ -179,7 +184,7 @@ function mapAssistantBlock(block: AssistantContentBlock): Anthropic.ContentBlock
     return { type: "tool_use", id: block.id, name: block.name, input: block.input };
   }
   if (block.type === "thinking") {
-    return { type: "thinking", thinking: block.thinking, signature: "" };
+    return { type: "thinking", thinking: block.thinking, signature: block.signature ?? "" };
   }
   return { type: "text", text: JSON.stringify(block) };
 }

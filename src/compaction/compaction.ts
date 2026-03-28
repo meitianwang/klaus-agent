@@ -75,6 +75,11 @@ export function findCutPoint(
     }
   }
 
+  // If all messages fit within keepRecentTokens, nothing to discard
+  if (cutIndex >= messages.length) {
+    return { firstKeptIndex: 0, isSplitTurn: false };
+  }
+
   // Ensure we don't cut at a tool_result (must follow its tool_call)
   while (cutIndex < messages.length) {
     const msg = messages[cutIndex];

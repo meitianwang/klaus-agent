@@ -76,6 +76,8 @@ export interface TextBlock {
 export interface ThinkingBlock {
   type: "thinking";
   thinking: string;
+  /** Opaque signature returned by the provider; must be echoed back in subsequent requests. */
+  signature?: string;
 }
 
 export type AssistantContentBlock = TextBlock | ToolCallBlock | ThinkingBlock;

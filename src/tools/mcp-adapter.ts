@@ -162,7 +162,7 @@ export class MCPAdapter {
 
         if (timeout || context.signal) {
           let timer: ReturnType<typeof setTimeout> | undefined;
-          const onAbort = () => {};
+          let abortHandler: (() => void) | undefined;
           const racers: Promise<MCPToolResult>[] = [callPromise];
 
           if (timeout) {
@@ -174,7 +174,8 @@ export class MCPAdapter {
           if (context.signal) {
             if (context.signal.aborted) throw new Error("Aborted");
             racers.push(new Promise<never>((_, reject) => {
-              context.signal!.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
+              abortHandler = () => reject(new Error("Aborted"));
+              context.signal!.addEventListener("abort", abortHandler, { once: true });
             }));
           }
 
@@ -182,6 +183,9 @@ export class MCPAdapter {
             result = await Promise.race(racers);
           } finally {
             if (timer !== undefined) clearTimeout(timer);
+            if (abortHandler && context.signal) {
+              context.signal.removeEventListener("abort", abortHandler);
+            }
           }
         } else {
           result = await callPromise;

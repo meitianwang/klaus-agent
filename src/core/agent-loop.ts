@@ -91,7 +91,7 @@ function toolResultsToMessages(results: ToolCallResult[]): ToolResultMessage[] {
     role: "tool_result" as const,
     toolCallId: r.toolCallId,
     content: r.result.content,
-    isError: r.isError || undefined,
+    isError: r.isError,
   }));
 }
 
@@ -442,9 +442,20 @@ export async function runAgentLoop(
       }
     }
   } catch (err) {
-    if (!(err instanceof Error && err.name === "AbortError")) {
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    if (!isAbort) {
       onEvent({ type: "error", error: err instanceof Error ? err : new Error(String(err)) });
     }
+
+    onEvent({ type: "agent_end", messages: allMessages });
+    await extensionRunner?.emitSimple("agent_end", { messages: allMessages });
+
+    // Re-throw non-abort errors so the caller (Agent._runLoop) can set error state.
+    // AbortError is intentional (user called agent.abort()), not an error condition.
+    if (!isAbort) {
+      throw err;
+    }
+    return allMessages;
   }
 
   onEvent({ type: "agent_end", messages: allMessages });

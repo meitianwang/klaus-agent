@@ -306,7 +306,6 @@ export class Agent {
 
   private async _ensureInitialized(): Promise<void> {
     if (this._initialized) return;
-    this._initialized = true;
 
     // Init session and restore messages
     if (this._sessionManager) {
@@ -399,6 +398,8 @@ export class Agent {
     if (this._config.taskGraph?.autoInjectResults !== false) {
       this._addInjectionProvider(new TaskResultInjectionProvider(this._taskGraph));
     }
+
+    this._initialized = true;
   }
 
   private _addInjectionProvider(provider: DynamicInjectionProvider): void {

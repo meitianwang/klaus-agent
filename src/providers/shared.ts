@@ -18,7 +18,8 @@ function isRetryableError(error: Error, patterns: string[]): boolean {
 
 /**
  * Wraps a streaming generator with exponential backoff retry logic.
- * Only retries on connection-level failures before streaming starts.
+ * Only retries on connection-level failures before any events have been yielded.
+ * Once streaming starts (first event yielded), errors are not retried to avoid duplicate output.
  */
 export async function* withRetry(
   streamOnce: () => AsyncIterable<AssistantMessageEvent>,
@@ -33,13 +34,18 @@ export async function* withRetry(
       await new Promise((r) => setTimeout(r, delay));
     }
 
+    let hasYielded = false;
     try {
-      yield* streamOnce();
+      for await (const event of streamOnce()) {
+        hasYielded = true;
+        yield event;
+      }
       return;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
 
-      if (!isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
+      // If we already yielded events, don't retry — caller has consumed partial output
+      if (hasYielded || !isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
         throw lastError;
       }
     }
