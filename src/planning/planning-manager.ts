@@ -4,6 +4,9 @@ import type { TodoItem, TodoStatus, PlanPhase, PlanningState, PlanningConfig } f
 import { PLANNING_TOOL_NAMES } from "./types.js";
 import { generateId } from "../utils/id.js";
 
+/** Number of built-in tools always added to allowedInPlanning (todo + plan_mode). */
+const BUILT_IN_PLANNING_TOOL_COUNT = Object.keys(PLANNING_TOOL_NAMES).length;
+
 export class PlanningManager {
   private _state: PlanningState;
   private _config: PlanningConfig;
@@ -41,6 +44,11 @@ export class PlanningManager {
   /** Pre-built set of tool names allowed during planning phase. */
   get allowedInPlanning(): ReadonlySet<string> {
     return this._allowedInPlanning;
+  }
+
+  /** Whether user configured read-only tools beyond the built-in planning tools. */
+  get hasConfiguredReadOnlyTools(): boolean {
+    return this._allowedInPlanning.size > BUILT_IN_PLANNING_TOOL_COUNT;
   }
 
   // --- Phase control ---

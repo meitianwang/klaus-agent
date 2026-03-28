@@ -291,6 +291,8 @@ function mapReasoningEffort(modelId: string, level?: ThinkingLevel): string | un
 
 // --- SSE parsing ---
 
+const MAX_SSE_BUFFER_BYTES = 1024 * 1024; // 1MB cap to prevent unbounded accumulation
+
 async function* parseSSE(response: Response): AsyncGenerator<Record<string, unknown>> {
   if (!response.body) return;
 
@@ -303,6 +305,10 @@ async function* parseSSE(response: Response): AsyncGenerator<Record<string, unkn
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+
+      if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+        throw new Error(`SSE buffer exceeded ${MAX_SSE_BUFFER_BYTES} bytes — aborting to prevent unbounded memory growth`);
+      }
 
       let idx = buffer.indexOf("\n\n");
       while (idx !== -1) {
@@ -326,8 +332,7 @@ async function* parseSSE(response: Response): AsyncGenerator<Record<string, unkn
       }
     }
   } finally {
-    try { await reader.cancel(); } catch { /* ignore */ }
-    try { reader.releaseLock(); } catch { /* ignore */ }
+    reader.cancel().catch(() => {});
   }
 }
 

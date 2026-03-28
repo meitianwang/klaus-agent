@@ -247,12 +247,23 @@ export class SessionManager {
       this._sessionId = (header as SessionHeader).id;
     }
 
-    // Rest are entries
+    // Rest are entries — validate required fields before accepting
     for (let i = 1; i < records.length; i++) {
-      const entry = records[i] as SessionEntry;
-      this._entries.push(entry);
-      this._entriesById.set(entry.id, entry);
+      const entry = records[i];
+      if (!this._isValidEntry(entry)) continue;
+      this._entries.push(entry as SessionEntry);
+      this._entriesById.set(entry.id, entry as SessionEntry);
       this._leafId = entry.id;
     }
+  }
+
+  private _isValidEntry(record: unknown): record is SessionEntry {
+    if (!record || typeof record !== "object") return false;
+    const r = record as Record<string, unknown>;
+    return (
+      typeof r.type === "string" &&
+      typeof r.id === "string" &&
+      typeof r.timestamp === "string"
+    );
   }
 }

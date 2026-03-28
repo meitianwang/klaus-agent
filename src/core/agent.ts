@@ -95,6 +95,7 @@ export class Agent {
   private _backgroundTaskManager: BackgroundTaskManager | undefined;
   private _planningManager: PlanningManager | undefined;
   private _taskGraph: TaskGraph;
+  private _createdSubagents: Agent[] = [];
   private _initialized = false;
 
   constructor(config: AgentConfig) {
@@ -293,6 +294,8 @@ export class Agent {
     this._listeners.clear();
     this._steeringQueue = [];
     this._followUpQueue = [];
+    await Promise.allSettled(this._createdSubagents.map((sub) => sub.dispose()));
+    this._createdSubagents = [];
     await this._mcpAdapter?.dispose();
     this._backgroundTaskManager?.dispose();
     this._taskGraph.dispose();
@@ -370,6 +373,7 @@ export class Agent {
           approval: this._approval.share(),
           name,
         });
+        this._createdSubagents.push(subAgent);
         this._laborMarket.addFixed(name, subAgent, subConfig.description);
       }
       // Add built-in TaskTool so LLM can delegate to subagents

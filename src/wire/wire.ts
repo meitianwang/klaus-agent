@@ -3,7 +3,7 @@
 import { generateId } from "../utils/id.js";
 import type { WireMessage, WireSubscriber, WireSubscription } from "./types.js";
 
-export interface WireOptions {
+interface WireOptions {
   /** Max messages to buffer for replay to late subscribers. 0 = no buffering. */
   bufferSize?: number;
 }

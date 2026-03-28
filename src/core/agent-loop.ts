@@ -29,7 +29,7 @@ import { estimateTokens, shouldCompact, findCutPoint, microCompact } from "../co
 import { normalizeHistory } from "../injection/history-normalizer.js";
 import { calculateCost } from "../providers/shared.js";
 
-export interface AgentLoopConfig {
+interface AgentLoopConfig {
   provider: LLMProvider;
   modelId: string;
   systemPrompt: string;
@@ -257,7 +257,7 @@ export async function runAgentLoop(
 
         // --- Phase-aware tool filtering ---
         let visibleTools = allTools;
-        if (config.planningManager?.phase === "planning" && config.planningManager.allowedInPlanning.size > 2) {
+        if (config.planningManager?.phase === "planning" && config.planningManager.hasConfiguredReadOnlyTools) {
           visibleTools = allTools.filter((t) => config.planningManager!.allowedInPlanning.has(t.name));
         }
 

@@ -8,21 +8,27 @@ interface PendingRequest {
   resolve: (approved: boolean) => void;
 }
 
+interface SharedApprovalState {
+  yolo: boolean;
+  autoApproveActions: Set<string>;
+}
+
 export class ApprovalImpl implements Approval {
-  private _yolo: boolean;
-  private _autoApproveActions: Set<string>;
+  private _shared: SharedApprovalState;
   private _pending = new Map<string, PendingRequest>();
   private _queue: ApprovalRequest[] = [];
   private _waiters: ((req: ApprovalRequest) => void)[] = [];
 
-  constructor(config?: ApprovalConfig) {
-    this._yolo = config?.yolo ?? false;
-    this._autoApproveActions = new Set(config?.autoApproveActions ?? []);
+  constructor(config?: ApprovalConfig, sharedState?: SharedApprovalState) {
+    this._shared = sharedState ?? {
+      yolo: config?.yolo ?? false,
+      autoApproveActions: new Set(config?.autoApproveActions ?? []),
+    };
   }
 
   async request(sender: string, action: string, description: string, toolCallId: string): Promise<boolean> {
-    if (this._yolo) return true;
-    if (this._autoApproveActions.has(action)) return true;
+    if (this._shared.yolo) return true;
+    if (this._shared.autoApproveActions.has(action)) return true;
 
     const req: ApprovalRequest = {
       id: generateId(),
@@ -72,7 +78,7 @@ export class ApprovalImpl implements Approval {
     this._pending.delete(requestId);
 
     if (response === "approve_for_session") {
-      this._autoApproveActions.add(pending.request.action);
+      this._shared.autoApproveActions.add(pending.request.action);
       pending.resolve(true);
     } else {
       pending.resolve(response === "approve");
@@ -80,29 +86,19 @@ export class ApprovalImpl implements Approval {
   }
 
   setYolo(yolo: boolean): void {
-    this._yolo = yolo;
+    this._shared.yolo = yolo;
   }
 
   isYolo(): boolean {
-    return this._yolo;
+    return this._shared.yolo;
   }
 
   get autoApproveActions(): Set<string> {
-    return this._autoApproveActions;
+    return this._shared.autoApproveActions;
   }
 
   share(): Approval {
-    // Shared state (yolo, autoApproveActions), independent queue
-    // Use a shared state object so changes propagate bidirectionally
-    const shared = new ApprovalImpl();
-    shared._autoApproveActions = this._autoApproveActions; // same reference
-    // Share yolo via getter/setter delegation
-    const parent = this;
-    Object.defineProperty(shared, '_yolo', {
-      get() { return parent._yolo; },
-      set(v: boolean) { parent._yolo = v; },
-      configurable: true,
-    });
-    return shared;
+    // Shared state (yolo, autoApproveActions) via same reference, independent queue
+    return new ApprovalImpl(undefined, this._shared);
   }
 }

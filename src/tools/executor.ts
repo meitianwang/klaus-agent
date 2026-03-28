@@ -5,7 +5,7 @@ import type { ToolCallBlock, TextContent } from "../llm/types.js";
 import type { Approval } from "../approval/types.js";
 import { Value } from "@sinclair/typebox/value";
 
-export interface ToolExecutorConfig {
+interface ToolExecutorConfig {
   tools: AgentTool[];
   mode: "sequential" | "parallel";
   approval: Approval;
@@ -16,7 +16,7 @@ export interface ToolExecutorConfig {
   onEvent: (event: ToolExecutorEvent) => void;
 }
 
-export type ToolExecutorEvent =
+type ToolExecutorEvent =
   | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_execution_update"; toolCallId: string; toolName: string; partialResult: AgentToolResult }
   | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: AgentToolResult; isError: boolean };

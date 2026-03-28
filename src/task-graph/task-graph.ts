@@ -1,6 +1,7 @@
 // Task graph — dependency-aware DAG with background execution and auto-unlock
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "fs";
+import { readFileSync, mkdirSync, existsSync } from "fs";
+import { writeFile, rename } from "fs/promises";
 import { join } from "path";
 import { generateId } from "../utils/id.js";
 import type { TaskNode, TaskStatus, TaskGraphConfig, CompletedTaskResult } from "./types.js";
@@ -242,13 +243,20 @@ export class TaskGraph {
     return false;
   }
 
+  private _persistPromise: Promise<void> = Promise.resolve();
+
   private _persist(): void {
     if (!this._config.persistDir) return;
-    const data = JSON.stringify([...this._tasks.values()], null, 2);
-    const target = join(this._config.persistDir, "tasks.json");
-    const tmp = target + ".tmp";
-    writeFileSync(tmp, data, "utf-8");
-    renameSync(tmp, target);
+    const dir = this._config.persistDir;
+    const tasks = [...this._tasks.values()];
+    this._persistPromise = this._persistPromise
+      .then(() => {
+        const data = JSON.stringify(tasks, null, 2);
+        const target = join(dir, "tasks.json");
+        const tmp = target + ".tmp";
+        return writeFile(tmp, data, "utf-8").then(() => rename(tmp, target));
+      })
+      .catch(() => { /* persist failure is non-fatal */ });
   }
 
   private _loadFromDisk(): void {
@@ -259,12 +267,28 @@ export class TaskGraph {
       const raw = JSON.parse(readFileSync(filePath, "utf-8"));
       if (!Array.isArray(raw)) return;
       for (const entry of raw) {
-        if (entry && typeof entry === "object" && typeof entry.id === "string" && typeof entry.subject === "string") {
-          this._tasks.set(entry.id, entry as TaskNode);
-        }
+        if (!this._isValidTaskNode(entry)) continue;
+        this._tasks.set(entry.id, entry as TaskNode);
       }
     } catch {
       // Corrupted file — start fresh
     }
+  }
+
+  private static readonly _validStatuses = new Set(["pending", "in_progress", "completed", "failed"]);
+
+  private _isValidTaskNode(entry: unknown): entry is TaskNode {
+    if (!entry || typeof entry !== "object") return false;
+    const e = entry as Record<string, unknown>;
+    return (
+      typeof e.id === "string" &&
+      typeof e.subject === "string" &&
+      typeof e.status === "string" &&
+      TaskGraph._validStatuses.has(e.status as string) &&
+      Array.isArray(e.blockedBy) &&
+      Array.isArray(e.blocks) &&
+      typeof e.createdAt === "number" &&
+      typeof e.updatedAt === "number"
+    );
   }
 }

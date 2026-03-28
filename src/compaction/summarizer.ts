@@ -3,7 +3,6 @@
 import type { LLMProvider, LLMRequestOptions, AssistantMessage } from "../llm/types.js";
 import type { AgentMessage } from "../types.js";
 import type { CompactionSummarizer, CompactionInput } from "./types.js";
-import { messagesToText } from "./compaction.js";
 
 const SUMMARIZE_PROMPT = `You are a conversation summarizer. Summarize the following conversation history concisely, preserving:
 - Key decisions and outcomes
@@ -42,13 +41,9 @@ export class LLMSummarizer implements CompactionSummarizer {
 
     let result = "";
     for await (const event of this.provider.stream(options)) {
-      if (event.type === "text") {
-        result += event.text;
-      } else if (event.type === "done") {
+      if (event.type === "done") {
         const textBlocks = event.message.content.filter((b) => b.type === "text");
-        if (textBlocks.length > 0) {
-          result = textBlocks.map((b) => (b as { text: string }).text).join("");
-        }
+        result = textBlocks.map((b) => (b as { text: string }).text).join("");
       }
     }
 

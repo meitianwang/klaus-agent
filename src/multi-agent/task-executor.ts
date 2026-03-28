@@ -4,7 +4,7 @@ import type { Agent } from "../core/agent.js";
 import type { LaborMarket } from "./labor-market.js";
 import type { AgentMessage, AgentEvent, AssistantMessage } from "../types.js";
 
-export interface TaskResult {
+interface TaskResult {
   messages: AgentMessage[];
   lastAssistantMessage?: AssistantMessage;
 }

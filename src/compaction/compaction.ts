@@ -139,23 +139,3 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
   return result;
 }
 
-export function messagesToText(messages: AgentMessage[]): string {
-  const parts: string[] = [];
-  for (const msg of messages) {
-    if (!msg || typeof msg !== "object" || !("role" in msg)) continue;
-    const m = msg as Message;
-
-    if (m.role === "user") {
-      const text = typeof m.content === "string" ? m.content : m.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-      parts.push(`User: ${text}`);
-    } else if (m.role === "assistant") {
-      const text = m.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-      const toolCalls = m.content.filter((b) => b.type === "tool_call").map((b) => (b as { name: string }).name);
-      parts.push(`Assistant: ${text}${toolCalls.length ? ` [tools: ${toolCalls.join(", ")}]` : ""}`);
-    } else if (m.role === "tool_result") {
-      const text = typeof m.content === "string" ? m.content : m.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-      parts.push(`Tool result: ${text.slice(0, 500)}`);
-    }
-  }
-  return parts.join("\n");
-}

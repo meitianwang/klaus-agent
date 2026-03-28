@@ -8,7 +8,6 @@ import type {
   AssistantMessage,
   AssistantContentBlock,
   TokenUsage,
-  ThinkingLevel,
   Message,
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapReasoningEffort } from "./shared.js";

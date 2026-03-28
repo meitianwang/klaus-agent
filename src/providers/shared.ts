@@ -12,7 +12,7 @@ export const RETRYABLE_PATTERNS: Record<string, string[]> = {
   codex: [...COMMON_RETRYABLE, "rate_limit", "usage_limit", "overloaded"],
 };
 
-export function isRetryableError(error: Error, patterns: string[]): boolean {
+function isRetryableError(error: Error, patterns: string[]): boolean {
   return patterns.some((p) => error.message.includes(p));
 }
 
@@ -40,8 +40,7 @@ export async function* withRetry(
       lastError = err instanceof Error ? err : new Error(String(err));
 
       if (!isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
-        yield { type: "error", error: lastError };
-        return;
+        throw lastError;
       }
     }
   }

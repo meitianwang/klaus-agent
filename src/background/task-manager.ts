@@ -82,6 +82,23 @@ export class BackgroundTaskManager {
     }
   }
 
+  /** Remove completed/failed tasks older than `maxAgeMs` (default: 5 minutes). */
+  prune(maxAgeMs = 5 * 60 * 1000): number {
+    const now = Date.now();
+    let removed = 0;
+    for (const [id, task] of this._tasks) {
+      if (
+        (task.status === "completed" || task.status === "failed") &&
+        task.completedAt &&
+        now - task.completedAt > maxAgeMs
+      ) {
+        this._tasks.delete(id);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   dispose(): void {
     this.abortAll();
     this._tasks.clear();
