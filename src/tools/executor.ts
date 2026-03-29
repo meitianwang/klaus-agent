@@ -5,12 +5,16 @@ import type { ToolCallBlock, TextContent } from "../llm/types.js";
 import type { Approval } from "../approval/types.js";
 import { Value } from "@sinclair/typebox/value";
 
+/** Maximum characters for a single tool result content. ~100k chars ≈ ~25k tokens. */
+const MAX_TOOL_RESULT_CHARS = 100_000;
+
 interface ToolExecutorConfig {
   tools: AgentTool[];
   mode: "sequential" | "parallel";
   approval: Approval;
   agentName: string;
   signal: AbortSignal;
+  maxToolResultChars?: number;
   beforeToolCall?: (ctx: BeforeToolCallContext) => Promise<BeforeToolCallResult | void>;
   afterToolCall?: (ctx: AfterToolCallContext) => Promise<AfterToolCallResult | void>;
   onEvent: (event: ToolExecutorEvent) => void;
@@ -181,6 +185,9 @@ async function executeSingleToolInner(
     isError = true;
   }
 
+  // Truncate oversized tool results to prevent context window explosion
+  result = truncateToolResult(result, config.maxToolResultChars ?? MAX_TOOL_RESULT_CHARS);
+
   // After hook
   if (config.afterToolCall) {
     const hookResult = await config.afterToolCall({ toolName: tc.name, toolCallId: tc.id, args, result, isError });
@@ -193,4 +200,41 @@ async function executeSingleToolInner(
 
   config.onEvent({ type: "tool_execution_end", toolCallId: tc.id, toolName: tc.name, result, isError });
   return { toolCallId: tc.id, toolName: tc.name, result, isError };
+}
+
+/** Truncate tool result content if it exceeds the character limit. */
+function truncateToolResult(result: AgentToolResult, maxChars: number): AgentToolResult {
+  let totalChars = 0;
+  for (const block of result.content) {
+    if (block.type === "text") totalChars += block.text.length;
+  }
+
+  if (totalChars <= maxChars) return result;
+
+  const truncatedContent: (TextContent | { type: "image"; source: any })[] = [];
+  let remaining = maxChars;
+  const suffix = `\n\n[Truncated: result exceeded ${maxChars} characters. Original size: ${totalChars} characters]`;
+  // Reserve space for suffix
+  remaining -= suffix.length;
+
+  for (const block of result.content) {
+    if (block.type !== "text") {
+      truncatedContent.push(block);
+      continue;
+    }
+    if (remaining <= 0) break;
+    if (block.text.length <= remaining) {
+      truncatedContent.push(block);
+      remaining -= block.text.length;
+    } else {
+      truncatedContent.push({ type: "text", text: block.text.slice(0, remaining) + suffix });
+      remaining = 0;
+    }
+  }
+
+  if (truncatedContent.length === 0) {
+    truncatedContent.push({ type: "text", text: suffix.trimStart() });
+  }
+
+  return { ...result, content: truncatedContent as AgentToolResult["content"] };
 }

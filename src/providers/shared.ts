@@ -18,8 +18,12 @@ function isRetryableError(error: Error, patterns: string[]): boolean {
 
 /**
  * Wraps a streaming generator with exponential backoff retry logic.
- * Only retries on connection-level failures before any events have been yielded.
- * Once streaming starts (first event yielded), errors are not retried to avoid duplicate output.
+ *
+ * Retry strategy:
+ * - Before any events yielded: always retry on retryable errors
+ * - After text/thinking events only (no tool_call_start): retry is safe because
+ *   the full assistant message will be reconstructed from the "done" event
+ * - After tool_call_start: cannot retry (caller may have started acting on the tool call)
  */
 export async function* withRetry(
   streamOnce: () => AsyncIterable<AssistantMessageEvent>,
@@ -30,24 +34,30 @@ export async function* withRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
-      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
       await new Promise((r) => setTimeout(r, delay));
     }
 
-    let hasYielded = false;
+    let hasYieldedToolCall = false;
     try {
       for await (const event of streamOnce()) {
-        hasYielded = true;
+        if (event.type === "tool_call_start") hasYieldedToolCall = true;
         yield event;
       }
       return;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
 
-      // If we already yielded events, don't retry — caller has consumed partial output
-      if (hasYielded || !isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
+      // Once a tool_call has been yielded, we cannot safely retry
+      // because the caller may have started processing it
+      if (hasYieldedToolCall || !isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
         throw lastError;
       }
+
+      // If we yielded text/thinking but no tool calls, we can still retry —
+      // the "done" event carries the full reconstructed message, so partial
+      // text events from a failed attempt are harmless (just duplicated UI text).
+      // The caller only uses the final "done" message for state.
     }
   }
 }

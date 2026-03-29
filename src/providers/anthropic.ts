@@ -36,28 +36,35 @@ export class AnthropicProvider implements LLMProvider {
 
     const thinkingBudget = mapThinkingBudget(thinkingLevel);
 
+    const mappedMessages = messages.map((m) => {
+      if (m.role === "user") {
+        return { role: "user" as const, content: typeof m.content === "string" ? m.content : m.content.map(mapContentBlock) };
+      }
+      if (m.role === "assistant") {
+        return { role: "assistant" as const, content: m.content.map(mapAssistantBlock) };
+      }
+      // tool_result
+      return {
+        role: "user" as const,
+        content: [{
+          type: "tool_result" as const,
+          tool_use_id: m.toolCallId,
+          content: typeof m.content === "string" ? m.content : m.content.map(mapToolResultContent),
+          ...(m.isError ? { is_error: true as const } : {}),
+        }],
+      };
+    });
+
+    // Apply cache_control breakpoints for prompt caching:
+    // 1. System prompt (always cached)
+    // 2. Last user/tool_result turn (cache recent context boundary)
+    applyCacheBreakpoints(mappedMessages);
+
     const params: Anthropic.MessageCreateParamsStreaming = {
       model,
       max_tokens: maxTokens ?? 8192,
-      system: systemPrompt,
-      messages: messages.map((m) => {
-        if (m.role === "user") {
-          return { role: "user" as const, content: typeof m.content === "string" ? m.content : m.content.map(mapContentBlock) };
-        }
-        if (m.role === "assistant") {
-          return { role: "assistant" as const, content: m.content.map(mapAssistantBlock) };
-        }
-        // tool_result
-        return {
-          role: "user" as const,
-          content: [{
-            type: "tool_result" as const,
-            tool_use_id: m.toolCallId,
-            content: typeof m.content === "string" ? m.content : m.content.map(mapToolResultContent),
-            ...(m.isError ? { is_error: true as const } : {}),
-          }],
-        };
-      }),
+      system: [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }],
+      messages: mappedMessages,
       stream: true,
       ...(tools?.length ? {
         tools: tools.map((t) => ({
@@ -182,6 +189,31 @@ function mapContentBlock(block: { type: string; [key: string]: any }): Anthropic
     return { type: "image", source: { type: "url", url: block.source.url } };
   }
   return { type: "text", text: JSON.stringify(block) };
+}
+
+/**
+ * Apply cache_control breakpoints to message array for prompt caching.
+ * Marks the last user/tool_result turn boundary so Anthropic can cache
+ * everything up to that point across requests.
+ */
+function applyCacheBreakpoints(messages: Array<{ role: string; content: any }>): void {
+  // Find the last user-role message and mark its last content block
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") continue;
+
+    if (Array.isArray(msg.content) && msg.content.length > 0) {
+      const lastBlock = msg.content[msg.content.length - 1];
+      lastBlock.cache_control = { type: "ephemeral" };
+      break;
+    }
+
+    // String content — convert to array so we can attach cache_control
+    if (typeof msg.content === "string") {
+      msg.content = [{ type: "text", text: msg.content, cache_control: { type: "ephemeral" } }];
+      break;
+    }
+  }
 }
 
 function mapAssistantBlock(block: AssistantContentBlock): Anthropic.ContentBlockParam {

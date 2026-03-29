@@ -491,6 +491,7 @@ export class Agent {
         extensionRunner: this._extensionRunner,
         compaction: compactionWithSummarizer,
         planningManager: this._planningManager,
+        maxContextTokens: this._config.model.maxContextTokens,
       });
 
       this._state.messages = result;

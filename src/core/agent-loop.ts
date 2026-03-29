@@ -54,6 +54,7 @@ interface AgentLoopConfig {
   compaction?: CompactionConfig & { summarize?: (messages: AgentMessage[]) => Promise<string> };
   planningManager?: PlanningManager;
   modelCost?: ModelCost;
+  maxContextTokens?: number;
 }
 
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
@@ -139,11 +140,21 @@ export async function runAgentLoop(
       // Inner loop: tool calls + steering
       let hasMoreWork = true;
       let stepCount = 0;
+      let emergencyCompactedThisStep = false;
 
       while (hasMoreWork && !config.signal.aborted) {
         hasMoreWork = false;
 
-        if (stepCount >= config.maxStepsPerTurn) break;
+        if (stepCount >= config.maxStepsPerTurn) {
+          // Inject a warning message so the model knows the limit was reached
+          const limitMsg: UserMessage = {
+            role: "user",
+            content: `<system-reminder>Step limit reached (${config.maxStepsPerTurn} steps). The agent loop will stop after this turn. Please wrap up your current work and provide a summary of progress so far.</system-reminder>`,
+          };
+          allMessages.push(limitMsg);
+          await sessionManager?.appendMessage(limitMsg);
+          break;
+        }
         stepCount++;
 
         // --- Checkpoint (before each step) ---
@@ -259,12 +270,22 @@ export async function runAgentLoop(
 
         // --- Stream LLM response ---
         const toolDefs = toolsToDefinitions(visibleTools);
+
+        // Compute maxTokens dynamically: reserve output budget within context window
+        let maxTokens: number | undefined;
+        if (config.maxContextTokens) {
+          const inputTokens = estimateTokens(contextMessages);
+          // Reserve at least 4096 tokens for output, cap at 16384
+          maxTokens = Math.max(4096, Math.min(16384, config.maxContextTokens - inputTokens));
+        }
+
         let requestOptions: LLMRequestOptions = {
           model: modelId,
           systemPrompt,
           messages: llmMessages,
           tools: toolDefs.length > 0 ? toolDefs : undefined,
           thinkingLevel: config.capabilities?.thinking !== false ? thinkingLevel : undefined,
+          maxTokens,
           signal: config.signal,
         };
 
@@ -292,33 +313,71 @@ export async function runAgentLoop(
         let usage: TokenUsage | undefined;
         let messageStartEmitted = false;
 
-        for await (const event of config.provider.stream(requestOptions)) {
-          if (event.type === "done") {
-            assistantMessage = event.message;
-            usage = event.usage;
-            const cost = calculateCost(config.modelCost, event.usage);
-            if (cost) usage.cost = cost;
-            onEvent({ type: "message_end", message: event.message, usage });
-            await extensionRunner?.emitSimple("message_end", { message: event.message });
-          } else if (event.type === "error") {
-            onEvent({ type: "error", error: event.error });
-            throw event.error;
-          } else {
-            if (!messageStartEmitted && (event.type === "text" || event.type === "tool_call_start" || event.type === "thinking")) {
+        try {
+          for await (const event of config.provider.stream(requestOptions)) {
+            if (event.type === "done") {
+              assistantMessage = event.message;
+              usage = event.usage;
+              const cost = calculateCost(config.modelCost, event.usage);
+              if (cost) usage.cost = cost;
+              onEvent({ type: "message_end", message: event.message, usage });
+              await extensionRunner?.emitSimple("message_end", { message: event.message });
+            } else if (event.type === "error") {
+              onEvent({ type: "error", error: event.error });
+              throw event.error;
+            } else {
+              if (!messageStartEmitted && (event.type === "text" || event.type === "tool_call_start" || event.type === "thinking")) {
+                const partial: AssistantMessage = { role: "assistant", content: [] };
+                onEvent({ type: "message_start", message: partial });
+                await extensionRunner?.emitSimple("message_start", { message: partial });
+                messageStartEmitted = true;
+              }
               const partial: AssistantMessage = { role: "assistant", content: [] };
-              onEvent({ type: "message_start", message: partial });
-              await extensionRunner?.emitSimple("message_start", { message: partial });
-              messageStartEmitted = true;
+              onEvent({ type: "message_update", message: partial, event });
             }
-            const partial: AssistantMessage = { role: "assistant", content: [] };
-            onEvent({ type: "message_update", message: partial, event });
           }
+        } catch (streamErr) {
+          // Handle context length exceeded errors with emergency compaction
+          // Guard: only attempt once per step to prevent infinite compaction loops
+          if (isContextOverflowError(streamErr) && compaction?.summarize && !messageStartEmitted && !emergencyCompactedThisStep) {
+            onEvent({ type: "compaction_start" });
+
+            // Emergency compaction: aggressively cut to keep only the most recent messages
+            const emergencyKeepTokens = Math.floor((compaction.keepRecentTokens ?? 20000) / 2);
+            const cutPoint = findCutPoint(allMessages, emergencyKeepTokens);
+
+            if (cutPoint.firstKeptIndex > 0) {
+              const toDiscard = allMessages.slice(0, cutPoint.firstKeptIndex);
+              const toKeep = allMessages.slice(cutPoint.firstKeptIndex);
+
+              const summary = await compaction.summarize(toDiscard);
+              allMessages.length = 0;
+              if (summary) {
+                allMessages.push({ role: "user", content: `<compaction-summary>${summary}</compaction-summary>` } as UserMessage);
+              }
+              allMessages.push(...toKeep);
+
+              if (sessionManager) {
+                const tokens = estimateTokens(allMessages);
+                await sessionManager.appendCompaction(summary, sessionManager.getLeafId() ?? "", tokens);
+              }
+
+              onEvent({ type: "compaction_end", summary });
+              emergencyCompactedThisStep = true;
+              hasMoreWork = true;
+              continue; // Retry the inner loop step with compacted context
+            }
+          }
+
+          // Not a context overflow or compaction not possible — rethrow
+          throw streamErr;
         }
 
         if (!assistantMessage) {
           break;
         }
 
+        emergencyCompactedThisStep = false; // Reset guard after successful response
         allMessages.push(assistantMessage);
         await sessionManager?.appendMessage(assistantMessage);
 
@@ -457,4 +516,18 @@ export async function runAgentLoop(
   onEvent({ type: "agent_end", messages: allMessages });
   await extensionRunner?.emitSimple("agent_end", { messages: allMessages });
   return allMessages;
+}
+
+/** Detect context length / token budget exceeded errors from various providers. */
+function isContextOverflowError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("context_length_exceeded") ||
+    msg.includes("context window") ||
+    msg.includes("maximum context length") ||
+    msg.includes("token limit") ||
+    msg.includes("too many tokens") ||
+    msg.includes("request too large")
+  );
 }

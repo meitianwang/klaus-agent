@@ -3,7 +3,23 @@
 import type { AgentMessage, Message, ToolResultMessage, ToolCallBlock } from "../types.js";
 import type { CutPointResult } from "./types.js";
 
-const CHARS_PER_TOKEN = 4;
+/**
+ * Estimate token count for a string using a mixed heuristic:
+ * ASCII chars average ~4 chars/token, non-ASCII (CJK, etc.) ~1.5 chars/token.
+ * This is significantly more accurate than a flat chars/4 for multilingual content.
+ */
+function estimateStringTokens(text: string): number {
+  let asciiChars = 0;
+  let nonAsciiChars = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) <= 127) {
+      asciiChars++;
+    } else {
+      nonAsciiChars++;
+    }
+  }
+  return Math.ceil(asciiChars / 4 + nonAsciiChars / 1.5);
+}
 
 export function estimateTokens(messages: AgentMessage[]): number {
   let total = 0;
@@ -18,26 +34,26 @@ function estimateMessageTokens(msg: AgentMessage): number {
   const m = msg as Message;
 
   if (m.role === "user") {
-    if (typeof m.content === "string") return Math.ceil(m.content.length / CHARS_PER_TOKEN);
+    if (typeof m.content === "string") return estimateStringTokens(m.content);
     return m.content.reduce((sum, block) => {
-      if (block.type === "text") return sum + Math.ceil(block.text.length / CHARS_PER_TOKEN);
+      if (block.type === "text") return sum + estimateStringTokens(block.text);
       return sum + 1000; // image estimate
     }, 0);
   }
 
   if (m.role === "assistant") {
     return m.content.reduce((sum, block) => {
-      if (block.type === "text") return sum + Math.ceil(block.text.length / CHARS_PER_TOKEN);
-      if (block.type === "thinking") return sum + Math.ceil(block.thinking.length / CHARS_PER_TOKEN);
-      if (block.type === "tool_call") return sum + Math.ceil(JSON.stringify(block.input).length / CHARS_PER_TOKEN) + 20;
+      if (block.type === "text") return sum + estimateStringTokens(block.text);
+      if (block.type === "thinking") return sum + estimateStringTokens(block.thinking);
+      if (block.type === "tool_call") return sum + estimateStringTokens(JSON.stringify(block.input)) + 20;
       return sum;
     }, 0);
   }
 
   if (m.role === "tool_result") {
-    if (typeof m.content === "string") return Math.ceil(m.content.length / CHARS_PER_TOKEN);
+    if (typeof m.content === "string") return estimateStringTokens(m.content);
     return m.content.reduce((sum, block) => {
-      if (block.type === "text") return sum + Math.ceil(block.text.length / CHARS_PER_TOKEN);
+      if (block.type === "text") return sum + estimateStringTokens(block.text);
       return sum + 1000;
     }, 0);
   }
