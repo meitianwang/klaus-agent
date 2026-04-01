@@ -29,6 +29,13 @@ export interface AgentTool<TParams extends TSchema = TSchema, TDetails = any> {
   parameters: TParams;
   approvalAction?: string;
 
+  /**
+   * Whether this tool can safely execute concurrently with other concurrent-safe tools.
+   * Used by the StreamingToolExecutor for parallel execution during streaming.
+   * Defaults to false if not provided.
+   */
+  isConcurrencySafe?: boolean | ((params: Static<TParams>) => boolean);
+
   execute(
     toolCallId: string,
     params: Static<TParams>,

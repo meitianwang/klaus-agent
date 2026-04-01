@@ -9,6 +9,7 @@ import type {
   AssistantMessage,
   AssistantContentBlock,
   TokenUsage,
+  StopReason,
   Message,
 } from "../llm/types.js";
 import { generateId } from "../utils/id.js";
@@ -28,7 +29,7 @@ export class GeminiProvider implements LLMProvider {
   }
 
   private async *_streamOnce(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
-    const { model: modelId, systemPrompt, messages, tools, thinkingLevel, maxTokens, signal } = options;
+    const { model: modelId, systemPrompt, messages, tools, thinkingLevel, maxTokens, maxOutputTokensOverride, signal } = options;
 
     const thinkingBudget = mapThinkingBudget(thinkingLevel);
 
@@ -46,7 +47,7 @@ export class GeminiProvider implements LLMProvider {
           }],
         } : {}),
         generationConfig: {
-          maxOutputTokens: maxTokens ?? 8192,
+          maxOutputTokens: maxOutputTokensOverride ?? maxTokens ?? 8192,
           ...(thinkingBudget ? {
             thinkingConfig: { thinkingBudget },
           } as Record<string, unknown> : {}),
@@ -60,6 +61,7 @@ export class GeminiProvider implements LLMProvider {
 
     const contentBlocks: AssistantContentBlock[] = [];
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    let stopReason: StopReason | undefined;
 
     for await (const chunk of result.stream) {
       const text = chunk.text?.();
@@ -80,24 +82,38 @@ export class GeminiProvider implements LLMProvider {
         for (const fc of fnCalls) {
           const id = generateId();
           const input = (fc.args ?? {}) as Record<string, unknown>;
-          contentBlocks.push({ type: "tool_call", id, name: fc.name, input });
+          const block = { type: "tool_call" as const, id, name: fc.name, input };
+          contentBlocks.push(block);
           yield { type: "tool_call_start", id, name: fc.name };
           yield { type: "tool_call_delta", id, input: JSON.stringify(input) };
+          yield { type: "tool_call_end" as const, block: { ...block } };
+        }
+      }
+
+      // Finish reason
+      const finishReason = (chunk as any).candidates?.[0]?.finishReason as string | undefined;
+      if (finishReason) {
+        switch (finishReason) {
+          case "STOP":       stopReason = "end_turn"; break;
+          case "MAX_TOKENS": stopReason = "max_tokens"; break;
+          case "OTHER":      stopReason = "end_turn"; break;
         }
       }
 
       // Usage
       if (chunk.usageMetadata) {
+        const meta = chunk.usageMetadata as any;
         usage = {
-          inputTokens: chunk.usageMetadata.promptTokenCount ?? 0,
-          outputTokens: chunk.usageMetadata.candidatesTokenCount ?? 0,
-          totalTokens: chunk.usageMetadata.totalTokenCount ?? 0,
+          inputTokens: meta.promptTokenCount ?? 0,
+          outputTokens: meta.candidatesTokenCount ?? 0,
+          totalTokens: meta.totalTokenCount ?? 0,
+          ...(meta.cachedContentTokenCount ? { cacheReadTokens: meta.cachedContentTokenCount } : {}),
         };
       }
     }
 
-    const message: AssistantMessage = { role: "assistant", content: contentBlocks };
-    yield { type: "done", message, usage };
+    const message: AssistantMessage = { role: "assistant", content: contentBlocks, ...(stopReason && { stopReason }) };
+    yield { type: "done", message, usage, stopReason };
   }
 }
 

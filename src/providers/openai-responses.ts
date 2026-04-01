@@ -30,7 +30,7 @@ export class OpenAIResponsesProvider implements LLMProvider {
   }
 
   private async *_streamOnce(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
-    const { model, systemPrompt, messages, tools, thinkingLevel, maxTokens, signal } = options;
+    const { model, systemPrompt, messages, tools, thinkingLevel, maxTokens, maxOutputTokensOverride, signal } = options;
 
     const effort = mapReasoningEffort(thinkingLevel);
 
@@ -40,7 +40,7 @@ export class OpenAIResponsesProvider implements LLMProvider {
       input: mapMessages(messages) as ResponseCreateParamsStreaming["input"],
       stream: true,
       store: false,
-      max_output_tokens: maxTokens ?? 8192,
+      max_output_tokens: maxOutputTokensOverride ?? maxTokens ?? 8192,
       include: ["reasoning.encrypted_content"],
       ...(tools?.length ? {
         tools: mapTools(tools) as ResponseCreateParamsStreaming["tools"],
@@ -106,6 +106,21 @@ export class OpenAIResponsesProvider implements LLMProvider {
           if (entry) {
             entry.args += delta;
             yield { type: "tool_call_delta", id: entry.callId, input: delta };
+          }
+        }
+      }
+
+      // Function call arguments complete — emit tool_call_end immediately
+      if (type === "response.function_call_arguments.done") {
+        const itemId = (event as any).item_id;
+        if (itemId) {
+          const entry = toolCalls.get(itemId);
+          if (entry) {
+            const block = contentBlocks.find((b) => b.type === "tool_call" && b.id === entry.callId);
+            if (block && block.type === "tool_call") {
+              try { block.input = JSON.parse(entry.args || "{}"); } catch { block.input = {}; }
+              yield { type: "tool_call_end" as const, block: { ...block } };
+            }
           }
         }
       }

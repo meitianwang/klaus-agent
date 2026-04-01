@@ -15,16 +15,14 @@ import type {
   TextContent,
   ImageContent,
   ToolCallBlock,
+  ToolUseSummaryMessage,
 } from "./llm/types.js";
 import type { AgentTool, AgentToolResult, BeforeToolCallContext, BeforeToolCallResult, AfterToolCallContext, AfterToolCallResult } from "./tools/types.js";
 import type { ApprovalRequest, ApprovalResponse, ApprovalConfig } from "./approval/types.js";
 
-// --- Custom message extension point ---
-
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface CustomAgentMessages {}
-
-export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
+// AgentMessage is Message. No custom extension — that was dead code (empty
+// interface, keyof {} = never, so the union was always just Message).
+export type AgentMessage = Message;
 
 // --- Agent state ---
 
@@ -62,6 +60,21 @@ export type AgentEvent =
   | { type: "task_failed"; taskId: string; taskName: string; error: string }
   | { type: "error"; error: Error };
 
+// --- After-turn hook ---
+// Called after every no-tool-call turn (the `!needsFollowUp` path).
+// Return `blockingMessages` to inject them as user messages and force the model
+// to continue. Return `preventContinuation: true` to stop the loop immediately.
+
+export interface AfterTurnContext {
+  messages: AgentMessage[];
+  assistantMessage: AssistantMessage;
+  usage?: TokenUsage;
+}
+
+export type AfterTurnResult =
+  | { blockingMessages: AgentMessage[]; preventContinuation?: false }
+  | { preventContinuation: true };
+
 // --- Agent hooks ---
 
 export interface AgentHooks {
@@ -69,6 +82,8 @@ export interface AgentHooks {
   convertToLlm?: (messages: AgentMessage[]) => Message[];
   beforeToolCall?: (ctx: BeforeToolCallContext) => Promise<BeforeToolCallResult | void>;
   afterToolCall?: (ctx: AfterToolCallContext) => Promise<AfterToolCallResult | void>;
+  // Stop-hook equivalent: runs after every no-tool turn.
+  afterTurn?: (ctx: AfterTurnContext) => Promise<AfterTurnResult | void>;
 }
 
 // --- Re-exports for convenience ---
@@ -88,6 +103,7 @@ export type {
   TextContent,
   ImageContent,
   ToolCallBlock,
+  ToolUseSummaryMessage,
   AgentTool,
   AgentToolResult,
   BeforeToolCallContext,

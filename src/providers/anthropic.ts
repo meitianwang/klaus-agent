@@ -8,6 +8,7 @@ import type {
   AssistantMessage,
   AssistantContentBlock,
   TokenUsage,
+  StopReason,
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapThinkingBudget } from "./shared.js";
 
@@ -32,7 +33,7 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   private async *_streamOnce(options: LLMRequestOptions): AsyncIterable<AssistantMessageEvent> {
-    const { model, systemPrompt, messages, tools, thinkingLevel, maxTokens, signal } = options;
+    const { model, systemPrompt, messages, tools, thinkingLevel, maxTokens, maxOutputTokensOverride, signal, systemPromptBlocks } = options;
 
     const thinkingBudget = mapThinkingBudget(thinkingLevel);
 
@@ -60,17 +61,30 @@ export class AnthropicProvider implements LLMProvider {
     // 2. Last user/tool_result turn (cache recent context boundary)
     applyCacheBreakpoints(mappedMessages);
 
+    // Use structured blocks if provided (cache-aware), otherwise wrap flat string
+    const systemParam = systemPromptBlocks && systemPromptBlocks.length > 0
+      ? systemPromptBlocks.map((b) => ({
+          type: "text" as const,
+          text: b.text,
+          ...(b.cache_control ? { cache_control: b.cache_control } : {}),
+        }))
+      : [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }];
+
     const params: Anthropic.MessageCreateParamsStreaming = {
       model,
-      max_tokens: maxTokens ?? 8192,
-      system: [{ type: "text" as const, text: systemPrompt, cache_control: { type: "ephemeral" as const } }],
+      max_tokens: maxOutputTokensOverride ?? maxTokens ?? 8192,
+      system: systemParam,
       messages: mappedMessages,
       stream: true,
       ...(tools?.length ? {
-        tools: tools.map((t) => ({
+        tools: tools.map((t, i) => ({
           name: t.name,
           description: t.description,
           input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+          // Cache breakpoint on the last tool definition — tools change rarely
+          // relative to messages, so caching the tool block saves significant tokens.
+          // This uses 1 of Anthropic's 4 available breakpoints.
+          ...(i === tools.length - 1 ? { cache_control: { type: "ephemeral" as const } } : {}),
         })),
       } : {}),
       ...(thinkingBudget ? {
@@ -81,6 +95,7 @@ export class AnthropicProvider implements LLMProvider {
     const contentBlocks: AssistantContentBlock[] = [];
     const toolInputBuffers = new Map<number, string>();
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    let stopReason: StopReason | undefined;
 
     const stream = this.client.messages.stream(params, { signal });
 
@@ -134,6 +149,9 @@ export class AnthropicProvider implements LLMProvider {
             block.input = {};
           }
           toolInputBuffers.delete(event.index);
+          // Emit tool_call_end so the streaming tool executor can start
+          // executing this tool immediately, before the full response completes.
+          yield { type: "tool_call_end" as const, block: { ...block } };
         }
       } else if (event.type === "message_delta") {
         if (event.usage) {
@@ -142,6 +160,12 @@ export class AnthropicProvider implements LLMProvider {
             outputTokens: event.usage.output_tokens,
             totalTokens: usage.inputTokens + event.usage.output_tokens,
           };
+        }
+        if (event.delta.stop_reason) {
+          const r = event.delta.stop_reason;
+          if (r === "end_turn" || r === "max_tokens" || r === "tool_use" || r === "stop_sequence") {
+            stopReason = r;
+          }
         }
       } else if (event.type === "message_start") {
         if (event.message.usage) {
@@ -157,8 +181,8 @@ export class AnthropicProvider implements LLMProvider {
       }
     }
 
-    const message: AssistantMessage = { role: "assistant", content: contentBlocks };
-    yield { type: "done", message, usage };
+    const message: AssistantMessage = { role: "assistant", content: contentBlocks, ...(stopReason && { stopReason }) };
+    yield { type: "done", message, usage, stopReason };
   }
 }
 

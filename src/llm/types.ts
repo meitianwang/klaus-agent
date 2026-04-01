@@ -82,9 +82,18 @@ export interface ThinkingBlock {
 
 export type AssistantContentBlock = TextBlock | ToolCallBlock | ThinkingBlock;
 
+export type StopReason = "end_turn" | "max_tokens" | "tool_use" | "stop_sequence";
+
 export interface AssistantMessage {
   role: "assistant";
   content: AssistantContentBlock[];
+  stopReason?: StopReason;
+  /** Set on synthetic error messages (413, rate-limit, etc.). */
+  isApiErrorMessage?: boolean;
+  /** Specific API error type (e.g. "prompt_too_long", "max_output_tokens"). */
+  apiError?: string;
+  /** Raw error details string from the API. Used by media size error detection. */
+  errorDetails?: string;
 }
 
 export interface ToolResultMessage {
@@ -95,6 +104,13 @@ export interface ToolResultMessage {
 }
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
+
+/** Tool use summary — generated asynchronously after tool execution, yielded next turn. */
+export interface ToolUseSummaryMessage {
+  type: "tool_use_summary";
+  summary: string;
+  precedingToolUseIds: string[];
+}
 
 // --- Token usage ---
 
@@ -131,10 +147,17 @@ export interface StreamThinkingEvent {
   thinking: string;
 }
 
+export interface StreamToolCallEndEvent {
+  type: "tool_call_end";
+  /** Completed tool call block with fully parsed input. */
+  block: ToolCallBlock;
+}
+
 export interface StreamDoneEvent {
   type: "done";
   message: AssistantMessage;
   usage: TokenUsage;
+  stopReason?: StopReason;
 }
 
 export interface StreamErrorEvent {
@@ -146,6 +169,7 @@ export type AssistantMessageEvent =
   | StreamTextEvent
   | StreamToolCallStartEvent
   | StreamToolCallDeltaEvent
+  | StreamToolCallEndEvent
   | StreamThinkingEvent
   | StreamDoneEvent
   | StreamErrorEvent;
@@ -164,6 +188,18 @@ export interface LLMRequestOptions {
   thinkingLevel?: ThinkingLevel;
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * Optional structured system prompt blocks with cache_control hints.
+   * When provided, providers that support structured system prompts (e.g., Anthropic)
+   * will use these blocks instead of the flat `systemPrompt` string for optimal caching.
+   * Providers that don't support this will fall back to `systemPrompt`.
+   */
+  systemPromptBlocks?: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }>;
+  /**
+   * Override for max output tokens. When set, takes precedence over maxTokens.
+   * Used by the max_output_tokens escalation path (8k → 64k).
+   */
+  maxOutputTokensOverride?: number;
 }
 
 export type LLMProviderFactory = (config: { apiKey?: string; baseUrl?: string }) => LLMProvider;
