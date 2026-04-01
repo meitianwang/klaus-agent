@@ -17,6 +17,8 @@ import type { MCPServerConfig, MCPClient } from "./tools/mcp-adapter.js";
 import type { TaskFactory } from "./background/types.js";
 import type { PlanningConfig } from "./planning/types.js";
 import type { TaskGraphConfig } from "./task-graph/types.js";
+import type { PromptSection } from "./core/system-prompt-builder.js";
+import type { DeferredToolsConfig } from "./tools/deferred-tools.js";
 
 export interface CreateAgentConfig {
   // Required
@@ -45,6 +47,11 @@ export interface CreateAgentConfig {
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
   planning?: PlanningConfig;
   taskGraph?: TaskGraphConfig;
+
+  // System prompt sections for structured assembly
+  promptSections?: PromptSection[];
+  // Deferred tools for progressive disclosure
+  deferredTools?: DeferredToolsConfig;
 
   // Advanced: provide your own LLM provider
   provider?: LLMProvider;
@@ -77,6 +84,8 @@ export function createAgent(config: CreateAgentConfig): Agent {
     backgroundTasks: config.backgroundTasks,
     planning: config.planning,
     taskGraph: config.taskGraph,
+    promptSections: config.promptSections,
+    deferredTools: config.deferredTools,
   });
 }
 
@@ -113,6 +122,15 @@ export { PlanningNagProvider } from "./planning/nag-injection.js";
 export { TaskGraph } from "./task-graph/task-graph.js";
 export { createTaskGraphTools } from "./task-graph/tools.js";
 export { TaskResultInjectionProvider } from "./task-graph/result-injection.js";
+export { SystemPromptBuilder } from "./core/system-prompt-builder.js";
+export { DeferredToolRegistry } from "./tools/deferred-tools.js";
+export { enforceBudget, estimateToolTokens } from "./core/context-budget.js";
+export {
+  ToolUsageReminderProvider,
+  PeriodicReminderProvider,
+  OneShotReminderProvider,
+  ConditionalReminderProvider,
+} from "./injection/system-reminders.js";
 
 // Core types
 export type {
@@ -124,7 +142,6 @@ export type {
   ThinkingLevel,
   AgentTool,
   ApprovalConfig,
-  CustomAgentMessages,
 } from "./types.js";
 
 // Tool types
@@ -162,6 +179,7 @@ export type {
   ImageContent,
   ToolCallBlock,
   ToolDefinition,
+  StopReason,
 } from "./llm/types.js";
 
 // Session types
@@ -258,3 +276,19 @@ export type {
   TaskStatus,
   CompletedTaskResult,
 } from "./task-graph/types.js";
+
+// System prompt builder types
+export type { PromptSection, Stability, SectionCollector } from "./core/system-prompt-builder.js";
+
+// Deferred tools types
+export type { DeferredToolsConfig } from "./tools/deferred-tools.js";
+
+// Context budget types
+export type { ContextBudget, BudgetResult } from "./core/context-budget.js";
+
+// System reminder types
+export type {
+  ToolUsageReminderConfig,
+  PeriodicReminderConfig,
+  ConditionalReminderConfig,
+} from "./injection/system-reminders.js";

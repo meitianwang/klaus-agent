@@ -23,6 +23,10 @@ import type { MCPServerConfig, MCPClient } from "../tools/mcp-adapter.js";
 import type { TaskFactory } from "../background/types.js";
 import type { PlanningConfig } from "../planning/types.js";
 import type { TaskGraphConfig } from "../task-graph/types.js";
+import type { DeferredToolsConfig } from "../tools/deferred-tools.js";
+import type { PromptSection } from "./system-prompt-builder.js";
+import { SystemPromptBuilder } from "./system-prompt-builder.js";
+import { DeferredToolRegistry } from "../tools/deferred-tools.js";
 import { SessionManager } from "../session/session-manager.js";
 import { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
 import { InjectionManager } from "../injection/injection-manager.js";
@@ -71,6 +75,22 @@ export interface AgentConfig {
   backgroundTasks?: { factories?: Record<string, TaskFactory> };
   taskGraph?: TaskGraphConfig;
   planning?: PlanningConfig;
+
+  /**
+   * Additional system prompt sections to include.
+   * These are merged with the base systemPrompt using the SystemPromptBuilder.
+   * Sections with stability "static" are placed first (cache-friendly),
+   * "session" in the middle, and "dynamic" last.
+   */
+  promptSections?: PromptSection[];
+
+  /**
+   * Deferred tools configuration for progressive disclosure.
+   * When configured, only tools in `alwaysInclude` are sent with full schemas.
+   * Other tools are listed by name in the system prompt and can be activated
+   * via the built-in ToolSearch tool.
+   */
+  deferredTools?: DeferredToolsConfig;
 }
 
 export class Agent {
@@ -96,6 +116,8 @@ export class Agent {
   private _backgroundTaskManager: BackgroundTaskManager | undefined;
   private _planningManager: PlanningManager | undefined;
   private _taskGraph: TaskGraph;
+  private _systemPromptBuilder: SystemPromptBuilder;
+  private _deferredToolRegistry: DeferredToolRegistry | undefined;
   private _createdSubagents: Agent[] = [];
   private _initialized = false;
 
@@ -167,6 +189,37 @@ export class Agent {
 
     // Task graph
     this._taskGraph = new TaskGraph(config.taskGraph ?? {});
+
+    // System prompt builder — section-based assembly
+    this._systemPromptBuilder = new SystemPromptBuilder();
+    // Add base system prompt as the primary static section
+    if (typeof config.systemPrompt === "string" && config.systemPrompt) {
+      this._systemPromptBuilder.set({
+        key: "base",
+        content: config.systemPrompt,
+        stability: "static",
+        priority: 0,
+      });
+    }
+    // Add user-provided sections
+    if (config.promptSections) {
+      for (const section of config.promptSections) {
+        this._systemPromptBuilder.set(section);
+      }
+    }
+
+    // Deferred tools
+    if (config.deferredTools) {
+      this._deferredToolRegistry = new DeferredToolRegistry(config.deferredTools);
+    }
+
+    // Built-in dynamic collectors — things the SDK knows about
+    this._systemPromptBuilder.addCollector(
+      "currentDate",
+      "dynamic",
+      () => `# currentDate\nToday's date is ${new Date().toISOString().split("T")[0]}.`,
+      10,
+    );
   }
 
   // --- Public API ---
@@ -181,6 +234,13 @@ export class Agent {
     // Resolve system prompt if dynamic
     if (typeof this._config.systemPrompt === "function") {
       this._state.systemPrompt = await this._config.systemPrompt();
+      // Update builder's base section with resolved value
+      this._systemPromptBuilder.set({
+        key: "base",
+        content: this._state.systemPrompt,
+        stability: "static",
+        priority: 0,
+      });
     }
 
     // Normalize input to messages
@@ -268,8 +328,23 @@ export class Agent {
     return this._taskGraph;
   }
 
+  get promptBuilder(): SystemPromptBuilder {
+    return this._systemPromptBuilder;
+  }
+
+  get deferredTools(): DeferredToolRegistry | undefined {
+    return this._deferredToolRegistry;
+  }
+
   setSystemPrompt(prompt: string): void {
     this._state.systemPrompt = prompt;
+    // Also update the base section in the builder
+    this._systemPromptBuilder.set({
+      key: "base",
+      content: prompt,
+      stability: "static",
+      priority: 0,
+    });
   }
 
   setModel(model: ModelConfig): void {
@@ -355,9 +430,17 @@ export class Agent {
     if (this._config.skills?.length) {
       const skills = await discoverSkills(this._config.skills);
       if (skills.length > 0) {
-        // Add skill list to system prompt for awareness
+        // Register skill list as a session-level section via collector
         const skillList = skills.map((s) => `- /${s.name}: ${s.description}`).join("\n");
-        this._state.systemPrompt += `\n\nAvailable skills (use invoke_skill tool to invoke):\n${skillList}`;
+        const skillContent = `Available skills (use invoke_skill tool to invoke):\n${skillList}`;
+        this._systemPromptBuilder.addCollector(
+          "skills",
+          "session",
+          () => skillContent,
+          50,
+        );
+        // Also append to legacy systemPrompt for backward compatibility
+        this._state.systemPrompt += `\n\n${skillContent}`;
         // Add built-in InvokeSkillTool so LLM can actually invoke skills
         this._state.tools = [...this._state.tools, createInvokeSkillTool(skills)];
       }
@@ -492,6 +575,8 @@ export class Agent {
         compaction: compactionWithSummarizer,
         planningManager: this._planningManager,
         maxContextTokens: this._config.model.maxContextTokens,
+        systemPromptBuilder: this._systemPromptBuilder,
+        deferredToolRegistry: this._deferredToolRegistry,
       });
 
       this._state.messages = result;
