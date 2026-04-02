@@ -10,6 +10,7 @@ import type {
   TokenUsage,
   StopReason,
   Message,
+  ToolResultBlock,
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapReasoningEffort } from "./shared.js";
 
@@ -41,7 +42,10 @@ export class OpenAIProvider implements LLMProvider {
       model,
       messages: [
         { role: "system" as const, content: systemPrompt },
-        ...messages.map((m) => mapMessage(m)),
+        ...messages.flatMap((m) => {
+          const mapped = mapMessage(m);
+          return Array.isArray(mapped) ? mapped : [mapped];
+        }),
       ],
       stream: true,
       stream_options: { include_usage: true },
@@ -112,23 +116,23 @@ export class OpenAIProvider implements LLMProvider {
                 const prevIdx = idx - 1;
                 const prevEntry = toolCalls.get(prevIdx);
                 if (prevEntry) {
-                  const prevBlock = contentBlocks.find((b) => b.type === "tool_call" && b.id === prevEntry.id);
-                  if (prevBlock && prevBlock.type === "tool_call") {
+                  const prevBlock = contentBlocks.find((b) => b.type === "tool_use" && b.id === prevEntry.id);
+                  if (prevBlock && prevBlock.type === "tool_use") {
                     try { prevBlock.input = JSON.parse(prevEntry.args || "{}"); } catch { prevBlock.input = {}; }
-                    yield { type: "tool_call_end" as const, block: { ...prevBlock } };
+                    yield { type: "tool_use_end" as const, block: { ...prevBlock } };
                   }
                 }
               }
               const id = tc.id ?? `call_${idx}`;
               const name = tc.function?.name ?? "";
               toolCalls.set(idx, { id, name, args: "" });
-              contentBlocks.push({ type: "tool_call", id, name, input: {} });
-              yield { type: "tool_call_start", id, name };
+              contentBlocks.push({ type: "tool_use", id, name, input: {} });
+              yield { type: "tool_use_start", id, name };
             }
             if (tc.function?.arguments) {
               const entry = toolCalls.get(idx)!;
               entry.args += tc.function.arguments;
-              yield { type: "tool_call_delta", id: entry.id, input: tc.function.arguments };
+              yield { type: "tool_use_delta", id: entry.id, input: tc.function.arguments };
             }
           }
         }
@@ -146,12 +150,12 @@ export class OpenAIProvider implements LLMProvider {
       }
     }
 
-    // Finalize tool call inputs and emit tool_call_end for the last tool
+    // Finalize tool use inputs and emit tool_use_end for the last tool
     for (const [, entry] of toolCalls) {
       const block = contentBlocks.find(
-        (b) => b.type === "tool_call" && b.id === entry.id,
+        (b) => b.type === "tool_use" && b.id === entry.id,
       );
-      if (block && block.type === "tool_call") {
+      if (block && block.type === "tool_use") {
         try {
           block.input = JSON.parse(entry.args || "{}");
         } catch {
@@ -159,14 +163,14 @@ export class OpenAIProvider implements LLMProvider {
         }
       }
     }
-    // Emit tool_call_end for the last tool (previous ones emitted during streaming)
+    // Emit tool_use_end for the last tool (previous ones emitted during streaming)
     if (toolCalls.size > 0) {
       const lastIdx = Math.max(...toolCalls.keys());
       const lastEntry = toolCalls.get(lastIdx);
       if (lastEntry) {
-        const lastBlock = contentBlocks.find((b) => b.type === "tool_call" && b.id === lastEntry.id);
-        if (lastBlock && lastBlock.type === "tool_call") {
-          yield { type: "tool_call_end" as const, block: { ...lastBlock } };
+        const lastBlock = contentBlocks.find((b) => b.type === "tool_use" && b.id === lastEntry.id);
+        if (lastBlock && lastBlock.type === "tool_use") {
+          yield { type: "tool_use_end" as const, block: { ...lastBlock } };
         }
       }
     }
@@ -176,54 +180,64 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
-function mapMessage(m: Message): OpenAI.ChatCompletionMessageParam {
+function mapMessage(m: Message): OpenAI.ChatCompletionMessageParam | OpenAI.ChatCompletionMessageParam[] {
   if (m.role === "user") {
     if (typeof m.content === "string") {
       return { role: "user", content: m.content };
     }
-    const parts: OpenAI.ChatCompletionContentPart[] = m.content.map((block) => {
-      if (block.type === "text") {
-        return { type: "text" as const, text: block.text };
-      }
-      if (block.type === "image") {
+    // Separate tool_result blocks from regular content blocks
+    const regularParts: OpenAI.ChatCompletionContentPart[] = [];
+    const toolResults: OpenAI.ChatCompletionToolMessageParam[] = [];
+    for (const block of m.content) {
+      if (block.type === "tool_result") {
+        const trb = block as ToolResultBlock;
+        const output = typeof trb.content === "string"
+          ? trb.content
+          : trb.content.map((b) => b.type === "text" ? b.text : JSON.stringify(b)).join("\n");
+        toolResults.push({ role: "tool", tool_call_id: trb.tool_use_id, content: output });
+      } else if (block.type === "text") {
+        regularParts.push({ type: "text" as const, text: block.text });
+      } else if (block.type === "image") {
         if (block.source.type === "url") {
-          return { type: "image_url" as const, image_url: { url: block.source.url } };
+          regularParts.push({ type: "image_url" as const, image_url: { url: block.source.url } });
+        } else {
+          regularParts.push({
+            type: "image_url" as const,
+            image_url: { url: `data:${block.source.mediaType};base64,${block.source.data}` },
+          });
         }
-        return {
-          type: "image_url" as const,
-          image_url: { url: `data:${block.source.mediaType};base64,${block.source.data}` },
-        };
-      }
-      return { type: "text" as const, text: JSON.stringify(block) };
-    });
-    return { role: "user", content: parts };
-  }
-
-  if (m.role === "assistant") {
-    let text = "";
-    const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
-    for (const b of m.content) {
-      if (b.type === "text") {
-        text += b.text;
-      } else if (b.type === "tool_call") {
-        toolCalls.push({
-          id: b.id,
-          type: "function" as const,
-          function: { name: b.name, arguments: JSON.stringify(b.input) },
-        });
+      } else {
+        regularParts.push({ type: "text" as const, text: JSON.stringify(block) });
       }
     }
-    return {
-      role: "assistant",
-      content: text || null,
-      ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
-    };
+    // If we have tool results, return them as separate messages
+    if (toolResults.length > 0) {
+      const msgs: OpenAI.ChatCompletionMessageParam[] = [...toolResults];
+      if (regularParts.length > 0) {
+        msgs.push({ role: "user", content: regularParts });
+      }
+      return msgs;
+    }
+    return { role: "user", content: regularParts };
   }
 
-  // tool_result
+  // assistant
+  let text = "";
+  const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
+  for (const b of m.content) {
+    if (b.type === "text") {
+      text += b.text;
+    } else if (b.type === "tool_use") {
+      toolCalls.push({
+        id: b.id,
+        type: "function" as const,
+        function: { name: b.name, arguments: JSON.stringify(b.input) },
+      });
+    }
+  }
   return {
-    role: "tool",
-    tool_call_id: m.toolCallId,
-    content: typeof m.content === "string" ? m.content : m.content.map((b) => b.type === "text" ? b.text : JSON.stringify(b)).join("\n"),
+    role: "assistant",
+    content: text || null,
+    ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
   };
 }

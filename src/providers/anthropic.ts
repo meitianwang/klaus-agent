@@ -9,6 +9,7 @@ import type {
   AssistantContentBlock,
   TokenUsage,
   StopReason,
+  ToolResultBlock,
 } from "../llm/types.js";
 import { withRetry, RETRYABLE_PATTERNS, mapThinkingBudget } from "./shared.js";
 
@@ -38,22 +39,11 @@ export class AnthropicProvider implements LLMProvider {
     const thinkingBudget = mapThinkingBudget(thinkingLevel);
 
     const mappedMessages = messages.map((m) => {
-      if (m.role === "user") {
-        return { role: "user" as const, content: typeof m.content === "string" ? m.content : m.content.map(mapContentBlock) };
-      }
       if (m.role === "assistant") {
         return { role: "assistant" as const, content: m.content.map(mapAssistantBlock) };
       }
-      // tool_result
-      return {
-        role: "user" as const,
-        content: [{
-          type: "tool_result" as const,
-          tool_use_id: m.toolCallId,
-          content: typeof m.content === "string" ? m.content : m.content.map(mapToolResultContent),
-          ...(m.isError ? { is_error: true as const } : {}),
-        }],
-      };
+      // user — may contain plain content, ToolResultBlock, or a mix
+      return { role: "user" as const, content: typeof m.content === "string" ? m.content : m.content.map(mapContentBlock) };
     });
 
     // Apply cache_control breakpoints for prompt caching:
@@ -96,6 +86,7 @@ export class AnthropicProvider implements LLMProvider {
     const toolInputBuffers = new Map<number, string>();
     let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let stopReason: StopReason | undefined;
+    let messageId: string | undefined;
 
     const stream = this.client.messages.stream(params, { signal });
 
@@ -105,9 +96,9 @@ export class AnthropicProvider implements LLMProvider {
         if (block.type === "text") {
           contentBlocks.push({ type: "text", text: "" });
         } else if (block.type === "tool_use") {
-          contentBlocks.push({ type: "tool_call", id: block.id, name: block.name, input: {} });
+          contentBlocks.push({ type: "tool_use", id: block.id, name: block.name, input: {} });
           toolInputBuffers.set(event.index, "");
-          yield { type: "tool_call_start", id: block.id, name: block.name };
+          yield { type: "tool_use_start", id: block.id, name: block.name };
         } else if (block.type === "thinking") {
           contentBlocks.push({ type: "thinking", thinking: "" });
         }
@@ -123,8 +114,8 @@ export class AnthropicProvider implements LLMProvider {
           const buf = (toolInputBuffers.get(event.index) ?? "") + delta.partial_json;
           toolInputBuffers.set(event.index, buf);
           const block = contentBlocks[event.index];
-          if (block && block.type === "tool_call") {
-            yield { type: "tool_call_delta", id: block.id, input: delta.partial_json };
+          if (block && block.type === "tool_use") {
+            yield { type: "tool_use_delta", id: block.id, input: delta.partial_json };
           }
         } else if (delta.type === "thinking_delta") {
           const block = contentBlocks[event.index];
@@ -141,7 +132,7 @@ export class AnthropicProvider implements LLMProvider {
         }
       } else if (event.type === "content_block_stop") {
         const block = contentBlocks[event.index];
-        if (block && block.type === "tool_call") {
+        if (block && block.type === "tool_use") {
           const buf = toolInputBuffers.get(event.index) ?? "{}";
           try {
             block.input = JSON.parse(buf || "{}");
@@ -149,9 +140,9 @@ export class AnthropicProvider implements LLMProvider {
             block.input = {};
           }
           toolInputBuffers.delete(event.index);
-          // Emit tool_call_end so the streaming tool executor can start
+          // Emit tool_use_end so the streaming tool executor can start
           // executing this tool immediately, before the full response completes.
-          yield { type: "tool_call_end" as const, block: { ...block } };
+          yield { type: "tool_use_end" as const, block: { ...block } };
         }
       } else if (event.type === "message_delta") {
         if (event.usage) {
@@ -168,6 +159,7 @@ export class AnthropicProvider implements LLMProvider {
           }
         }
       } else if (event.type === "message_start") {
+        messageId = event.message.id;
         if (event.message.usage) {
           const u = event.message.usage;
           usage = {
@@ -181,7 +173,7 @@ export class AnthropicProvider implements LLMProvider {
       }
     }
 
-    const message: AssistantMessage = { role: "assistant", content: contentBlocks, ...(stopReason && { stopReason }) };
+    const message: AssistantMessage = { role: "assistant", content: contentBlocks, ...(messageId && { id: messageId }), ...(stopReason && { stopReason }) };
     yield { type: "done", message, usage, stopReason };
   }
 }
@@ -211,6 +203,15 @@ function mapContentBlock(block: { type: string; [key: string]: any }): Anthropic
       };
     }
     return { type: "image", source: { type: "url", url: block.source.url } };
+  }
+  if (block.type === "tool_result") {
+    const trb = block as unknown as ToolResultBlock;
+    return {
+      type: "tool_result" as const,
+      tool_use_id: trb.tool_use_id,
+      content: typeof trb.content === "string" ? trb.content : (trb.content as any[]).map(mapToolResultContent),
+      ...(trb.is_error ? { is_error: true as const } : {}),
+    };
   }
   return { type: "text", text: JSON.stringify(block) };
 }
@@ -244,7 +245,7 @@ function mapAssistantBlock(block: AssistantContentBlock): Anthropic.ContentBlock
   if (block.type === "text") {
     return { type: "text", text: block.text };
   }
-  if (block.type === "tool_call") {
+  if (block.type === "tool_use") {
     return { type: "tool_use", id: block.id, name: block.name, input: block.input };
   }
   if (block.type === "thinking") {

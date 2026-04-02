@@ -1,32 +1,38 @@
 // Built-in InvokeSkillTool — allows LLM to invoke discovered skills
 
-import { Type } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult, ToolExecutionContext } from "../tools/types.js";
+import { z } from "zod/v4";
+import type { AgentTool, AgentToolResult, ToolResultBlockParam } from "../tools/types.js";
+import { buildTool, DEFAULT_MAX_RESULT_SIZE_CHARS } from "../tools/types.js";
 import type { Skill } from "./types.js";
 import { renderSkillTemplate } from "./loader.js";
 
 export function createInvokeSkillTool(skills: Skill[]): AgentTool {
   const skillMap = new Map(skills.map((s) => [s.name, s]));
 
-  return {
+  return buildTool({
     name: "invoke_skill",
-    label: "Invoke Skill",
-    description: buildSkillToolDescription(skills),
-    parameters: Type.Object({
-      skill: Type.String({ description: "Name of the skill to invoke" }),
-      variables: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Template variables" })),
+    async description() { return buildSkillToolDescription(skills); },
+    async prompt() { return ""; },
+    maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
+    mapToolResultToToolResultBlockParam(content: unknown, toolUseID: string): ToolResultBlockParam {
+      return { type: "tool_result" as const, tool_use_id: toolUseID, content: typeof content === "string" ? content : JSON.stringify(content) };
+    },
+    renderToolUseMessage() { return null; },
+    inputSchema: z.strictObject({
+      skill: z.string().describe("Name of the skill to invoke"),
+      variables: z.record(z.string(), z.string()).optional().describe("Template variables"),
     }),
+    isConcurrencySafe: () => true,
+    isReadOnly: () => true,
 
-    async execute(
-      toolCallId: string,
+    async call(
       params: { skill: string; variables?: Record<string, string> },
-      context: ToolExecutionContext,
     ): Promise<AgentToolResult> {
       const skill = skillMap.get(params.skill);
       if (!skill) {
         const available = [...skillMap.keys()].join(", ");
         return {
-          content: [{ type: "text", text: `Unknown skill: "${params.skill}". Available: ${available || "none"}` }],
+          data: [{ type: "text", text: `Unknown skill: "${params.skill}". Available: ${available || "none"}` }],
         };
       }
 
@@ -35,10 +41,10 @@ export function createInvokeSkillTool(skills: Skill[]): AgentTool {
         : skill.content;
 
       return {
-        content: [{ type: "text", text: rendered }],
+        data: [{ type: "text", text: rendered }],
       };
     },
-  };
+  }) as AgentTool;
 }
 
 function buildSkillToolDescription(skills: Skill[]): string {

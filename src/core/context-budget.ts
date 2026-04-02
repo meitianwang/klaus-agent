@@ -8,6 +8,17 @@ import type { AgentTool } from "../tools/types.js";
 import type { AgentMessage } from "../types.js";
 import type { DeferredToolRegistry } from "../tools/deferred-tools.js";
 import { estimateTokens } from "../compaction/compaction.js";
+import { zodToJsonSchema } from "../utils/zodToJsonSchema.js";
+
+/** Get JSON Schema for a tool (inputJSONSchema takes priority, otherwise convert Zod). */
+function getToolJsonSchema(tool: AgentTool): Record<string, unknown> {
+  if (tool.inputJSONSchema) return tool.inputJSONSchema;
+  try {
+    return zodToJsonSchema(tool.inputSchema);
+  } catch {
+    return {};
+  }
+}
 
 export interface ContextBudget {
   maxContextTokens: number;
@@ -28,11 +39,13 @@ export interface BudgetResult {
 }
 
 /** Estimate token count for tool definitions. */
-export function estimateToolTokens(tools: AgentTool[]): number {
+export async function estimateToolTokens(tools: AgentTool[]): Promise<number> {
   let total = 0;
   for (const tool of tools) {
-    total += Math.ceil((tool.name.length + tool.description.length) / 4);
-    total += Math.ceil(JSON.stringify(tool.parameters ?? {}).length / 4);
+    const desc = await tool.description({}, { isNonInteractiveSession: false, toolPermissionContext: { mode: "default", additionalWorkingDirectories: new Map(), alwaysAllowRules: {}, alwaysDenyRules: {}, alwaysAskRules: {}, isBypassPermissionsModeAvailable: false }, tools });
+    total += Math.ceil((tool.name.length + desc.length) / 4);
+    const schema = getToolJsonSchema(tool);
+    total += Math.ceil(JSON.stringify(schema).length / 4);
     total += 20;
   }
   return total;
@@ -59,14 +72,14 @@ function estimatePromptTokens(text: string): number {
  * Returns the final active tool list, deferred names, and budget metrics.
  * The caller uses these directly — no need to call partition() again.
  */
-export function enforceBudget(
+export async function enforceBudget(
   systemPrompt: string,
   allTools: AgentTool[],
   messages: AgentMessage[],
   budget: ContextBudget,
   deferredRegistry?: DeferredToolRegistry,
   calibrationRatio = 1.0,
-): BudgetResult {
+): Promise<BudgetResult> {
   const rawSystemPromptTokens = estimatePromptTokens(systemPrompt);
   const rawHistoryTokens = estimateTokens(messages);
 
@@ -88,16 +101,24 @@ export function enforceBudget(
     deferredNames = initial.deferredNames;
   }
 
-  // Step 2: If active tools exceed budget, force-defer the largest ones
-  let toolTokens = estimateToolTokens(activeTools);
+  // Step 2: If active tools exceed budget, force-defer the largest ones.
+  // Never force-defer tools that were previously activated via ToolSearch —
+  // the model already fetched their schema and may try to call them. Removing
+  // them would cause confusing "unknown tool" errors.
+  let toolTokens = await estimateToolTokens(activeTools);
   if (toolTokens > maxToolBudget && deferredRegistry) {
+    const activatedNames = deferredRegistry.getActivatedNames();
     // Sort active tools by schema size descending (defer most expensive first)
-    // Never defer tool_search itself, and respect alwaysInclude via the registry
+    // Never defer ToolSearch itself, activated tools, or alwaysLoad tools.
     const candidates = activeTools
-      .filter((t) => t.name !== "tool_search")
+      .filter((t) =>
+        t.name !== "ToolSearch" &&
+        !activatedNames.has(t.name) &&
+        !t.alwaysLoad,
+      )
       .map((t) => ({
         tool: t,
-        tokens: Math.ceil(JSON.stringify(t.parameters ?? {}).length / 4) + 20,
+        tokens: Math.ceil(JSON.stringify(getToolJsonSchema(t)).length / 4) + 20,
       }))
       .sort((a, b) => b.tokens - a.tokens);
 
@@ -113,7 +134,7 @@ export function enforceBudget(
       // Remove force-deferred tools from active list, add to deferred names
       activeTools = activeTools.filter((t) => !toDeferNames.has(t.name));
       deferredNames = [...deferredNames, ...toDeferNames];
-      toolTokens = estimateToolTokens(activeTools);
+      toolTokens = await estimateToolTokens(activeTools);
     }
   }
 

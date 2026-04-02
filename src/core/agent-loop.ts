@@ -37,15 +37,14 @@ import type {
   Message,
   AssistantMessage,
   ToolResultMessage,
-  ToolCallBlock,
+  ToolUseBlock,
   TokenUsage,
   UserMessage,
   ThinkingLevel,
   ModelCost,
-  ToolUseSummaryMessage,
 } from "../types.js";
-import type { AgentTool } from "../tools/types.js";
-import type { LLMProvider, LLMRequestOptions, ToolDefinition, AssistantMessageEvent } from "../llm/types.js";
+import type { AgentTool, CanUseToolFn } from "../tools/types.js";
+import type { LLMProvider, LLMRequestOptions, ToolDefinition, AssistantMessageEvent, ContentBlock } from "../llm/types.js";
 import type { Approval } from "../approval/types.js";
 import type { SessionManager } from "../session/session-manager.js";
 import type { CheckpointManager } from "../checkpoint/checkpoint-manager.js";
@@ -54,17 +53,21 @@ import type { ExtensionRunner } from "../extensions/runner.js";
 import type { CompactionConfig } from "../compaction/types.js";
 import type { PlanningManager } from "../planning/planning-manager.js";
 import { PLANNING_TOOL_NAMES } from "../planning/types.js";
-import { executeToolCalls, type ToolCallResult } from "../tools/executor.js";
-import { StreamingToolExecutor } from "../tools/streaming-executor.js";
+import type { MessageUpdateLazy } from "../tools/executor.js";
+import { runToolsOrchestrated } from "../tools/orchestration.js";
+import { StreamingToolExecutor, type MessageUpdate } from "../tools/streaming-executor.js";
 import { estimateTokens, shouldCompact, findCutPoint, microCompact } from "../compaction/compaction.js";
 import { ContextCollapseManager, type ContextCollapseConfig } from "../compaction/context-collapse.js";
 import { isWithheldMediaSizeError, isMediaSizeError, stripImagesFromMessages } from "../compaction/media-recovery.js";
-import { generateToolUseSummary, type ToolUseSummaryConfig } from "../services/tool-use-summary.js";
+import { generateToolUseSummary, type ToolUseSummaryConfig, type ToolInfo } from "../services/tool-use-summary.js";
 import { normalizeHistory } from "../injection/history-normalizer.js";
 import { calculateCost } from "../providers/shared.js";
+import { zodToJsonSchema } from "../utils/zodToJsonSchema.js";
+import { createToolResultMessage, isToolResultMessage, getToolUseId } from "../utils/messages.js";
 import type { SystemPromptBuilder } from "./system-prompt-builder.js";
 import type { DeferredToolRegistry } from "../tools/deferred-tools.js";
 import { enforceBudget } from "./context-budget.js";
+import { applyToolResultBudget, provisionContentReplacementState, type ContentReplacementState } from "../tools/tool-result-storage.js";
 
 export interface AgentLoopConfig {
   provider: LLMProvider;
@@ -118,7 +121,7 @@ type LoopState = {
   totalOutputTokens: number;
   lastApiInputTokens?: number;
   lastEstimatedInputTokens?: number;
-  pendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined;
+  pendingToolUseSummary: Promise<string | null> | undefined;
   transition: { reason: string; [key: string]: unknown } | undefined;
 };
 
@@ -168,13 +171,13 @@ function checkTokenBudget(
 function defaultConvertToLlm(messages: AgentMessage[]): Message[] {
   return messages.filter((m): m is Message =>
     typeof m === "object" && m !== null && "role" in m &&
-    (m.role === "user" || m.role === "assistant" || m.role === "tool_result"),
+    (m.role === "user" || m.role === "assistant"),
   );
 }
 
 function stripImages(messages: Message[]): Message[] {
   return messages.map((m) => {
-    if ((m.role === "user" || m.role === "tool_result") && Array.isArray(m.content)) {
+    if (m.role === "user" && Array.isArray(m.content)) {
       const filtered = m.content.filter((b) => b.type !== "image");
       return { ...m, content: filtered.length > 0 ? filtered : "[image removed — model does not support vision]" };
     }
@@ -182,21 +185,22 @@ function stripImages(messages: Message[]): Message[] {
   });
 }
 
-function toolsToDefinitions(tools: AgentTool[]): ToolDefinition[] {
-  return tools.map((t) => ({
+async function toolsToDefinitions(tools: AgentTool[]): Promise<ToolDefinition[]> {
+  return Promise.all(tools.map(async (t) => ({
     name: t.name,
-    description: t.description,
-    inputSchema: t.parameters as any,
-  }));
+    description: await t.description({}, { isNonInteractiveSession: false, toolPermissionContext: { mode: "default", additionalWorkingDirectories: new Map(), alwaysAllowRules: {}, alwaysDenyRules: {}, alwaysAskRules: {}, isBypassPermissionsModeAvailable: false }, tools }),
+    inputSchema: (
+      t.inputJSONSchema
+        ? t.inputJSONSchema
+        : zodToJsonSchema(t.inputSchema)
+    ) as Record<string, unknown>,
+  })));
 }
 
-function toolResultsToMessages(results: ToolCallResult[]): ToolResultMessage[] {
-  return results.map((r) => ({
-    role: "tool_result" as const,
-    toolCallId: r.toolCallId,
-    content: r.result.content,
-    isError: r.isError,
-  }));
+function toolResultsToMessages(results: UserMessage[], assistantMessages: AssistantMessage[]): UserMessage[] {
+  // With the new architecture, runToolUse yields UserMessage directly.
+  // This function is now a pass-through for backward compatibility.
+  return results;
 }
 
 /** Detect context length / token budget exceeded errors from any provider. */
@@ -276,6 +280,9 @@ export async function runAgentLoop(
 
   // Media recovery gate — hoisted once at entry, not per-turn.
   const mediaRecoveryEnabled = config.mediaRecovery ?? false;
+
+  // Content replacement state for tool result budget enforcement.
+  const contentReplacementState = provisionContentReplacementState(true);
 
   let state: LoopState = {
     allMessages: [...initialMessages],
@@ -369,6 +376,9 @@ export async function runAgentLoop(
       }
 
       // ── Build contextForLlm ───────────────────────────────────────────────────
+      // Tool result budget enforcement — after microCompact/context collapse, before LLM request.
+      messagesForQuery = await applyToolResultBudget(messagesForQuery, contentReplacementState);
+
       let contextForLlm: Message[] = [...messagesForQuery];
 
       if (injectionManager) {
@@ -423,7 +433,7 @@ export async function runAgentLoop(
         }
         lastEstimatedInputTokens = estimateTokens(contextForLlm);
 
-        const budgetResult = enforceBudget(
+        const budgetResult = await enforceBudget(
           systemPrompt,
           visibleTools,
           contextForLlm,
@@ -458,7 +468,7 @@ export async function runAgentLoop(
       }
 
       // ── Build LLM request ─────────────────────────────────────────────────────
-      const toolDefs = toolsToDefinitions(visibleTools);
+      const toolDefs = await toolsToDefinitions(visibleTools);
       let requestOptions: LLMRequestOptions = {
         model: modelId,
         systemPrompt: effectiveSystemPrompt,
@@ -496,39 +506,48 @@ export async function runAgentLoop(
       // Created once per turn, discarded on fallback.
       let streamingToolExecutor: StreamingToolExecutor | null = null;
       if (config.streamingToolExecution) {
-        streamingToolExecutor = new StreamingToolExecutor({
-          tools: visibleTools,
-          approval: config.approval,
-          agentName: config.agentName,
-          signal: config.signal,
-          beforeToolCall: async (ctx) => {
-            const extResult = await extensionRunner?.emitToolCall({
-              toolName: ctx.toolName,
-              toolCallId: ctx.toolCallId,
-              args: ctx.args,
-            });
-            if (extResult?.block) return extResult;
-            return config.hooks?.beforeToolCall?.(ctx);
+        const loopAbortController = new AbortController();
+        // Forward parent signal to loop-scoped controller
+        if (config.signal.aborted) {
+          loopAbortController.abort(config.signal.reason);
+        } else {
+          config.signal.addEventListener("abort", () => loopAbortController.abort(config.signal.reason), { once: true });
+        }
+        // Aligned with claude-code: constructor takes (toolDefinitions, canUseTool, toolUseContext)
+        const defaultCanUseTool: CanUseToolFn = async (_tool, _input, _ctx, _msg, _id) => ({ behavior: "allow" as const });
+        streamingToolExecutor = new StreamingToolExecutor(
+          visibleTools,
+          defaultCanUseTool,
+          {
+            options: {
+              commands: [],
+              debug: false,
+              mainLoopModel: config.modelId,
+              tools: visibleTools,
+              verbose: false,
+              thinkingConfig: { type: "disabled" },
+              mcpClients: [],
+              mcpResources: {},
+              isNonInteractiveSession: true,
+              agentDefinitions: { activeAgents: [], allAgents: [] },
+            },
+            abortController: loopAbortController,
+            readFileState: { get: () => undefined, set() { return this; }, has: () => false, delete: () => false, clear: () => {}, get size() { return 0; } },
+            getAppState: () => ({}),
+            setAppState: () => {},
+            setInProgressToolUseIDs: () => {},
+            setResponseLength: () => {},
+            updateFileHistoryState: () => {},
+            updateAttributionState: () => {},
+            messages: allMessages as any[],
           },
-          afterToolCall: async (ctx) => {
-            const extResult = await extensionRunner?.emitToolResult({
-              toolName: ctx.toolName,
-              toolCallId: ctx.toolCallId,
-              args: ctx.args,
-              result: ctx.result,
-              isError: ctx.isError,
-            });
-            const hookResult = await config.hooks?.afterToolCall?.(ctx);
-            return hookResult ?? extResult ?? undefined;
-          },
-          onEvent: (e) => onEvent(e as any),
-        });
+        );
       }
 
       // ── Stream LLM ────────────────────────────────────────────────────────────
       const assistantMessages: AssistantMessage[] = [];
-      const toolUseBlocks: ToolCallBlock[] = [];
-      const streamingToolResults: ToolCallResult[] = [];
+      const toolUseBlocks: ToolUseBlock[] = [];
+      const streamingToolResults: UserMessage[] = [];
       let needsFollowUp = false;
       let usage: TokenUsage | undefined;
       let messageStartEmitted = false;
@@ -562,26 +581,27 @@ export async function runAgentLoop(
               await extensionRunner?.emitSimple("message_end", { message: msg });
             }
 
-            // Tool blocks already fed to streaming executor via tool_call_end
+            // Tool blocks already fed to streaming executor via tool_use_end
             // events during streaming. No need to re-feed from done message.
           } else if (event.type === "error") {
             onEvent({ type: "error", error: event.error });
             throw event.error;
           } else {
-            if (!messageStartEmitted && (event.type === "text" || event.type === "tool_call_start" || event.type === "thinking")) {
+            if (!messageStartEmitted && (event.type === "text" || event.type === "tool_use_start" || event.type === "thinking")) {
               const partial: AssistantMessage = { role: "assistant", content: [] };
               onEvent({ type: "message_start", message: partial });
               await extensionRunner?.emitSimple("message_start", { message: partial });
               messageStartEmitted = true;
             }
-            if (event.type === "tool_call_start") {
+            if (event.type === "tool_use_start") {
               needsFollowUp = true;
             }
             // Feed completed tool blocks to streaming executor immediately.
             // Feed completed tool blocks to streaming executor immediately;
             // tools start executing during streaming before the full response completes.
-            if (event.type === "tool_call_end" && streamingToolExecutor && !config.signal.aborted) {
-              streamingToolExecutor.addTool(event.block);
+            if (event.type === "tool_use_end" && streamingToolExecutor && !config.signal.aborted) {
+              const lastAssistant = assistantMessages[assistantMessages.length - 1] ?? { role: "assistant" as const, content: [] };
+              streamingToolExecutor.addTool(event.block, lastAssistant);
             }
             onEvent({ type: "message_update", message: { role: "assistant", content: [] }, event });
           }
@@ -589,8 +609,8 @@ export async function runAgentLoop(
           // ── Yield completed streaming tool results during streaming ────────
           // Yield completed streaming tool results during the stream loop.
           if (streamingToolExecutor && !config.signal.aborted) {
-            for (const result of streamingToolExecutor.getCompletedResults()) {
-              streamingToolResults.push(result);
+            for (const update of streamingToolExecutor.getCompletedResults()) {
+              if (update.message) streamingToolResults.push(update.message as UserMessage);
             }
           }
         }
@@ -627,9 +647,9 @@ export async function runAgentLoop(
       // (generates synthetic tool_results for queued/in-progress tools) and break.
       if (config.signal.aborted) {
         if (streamingToolExecutor) {
-          for await (const result of streamingToolExecutor.getRemainingResults()) {
+          for await (const update of streamingToolExecutor.getRemainingResults()) {
             // Consume synthetic results — tool_use blocks need matching tool_result blocks
-            streamingToolResults.push(result);
+            if (update.message) streamingToolResults.push(update.message as UserMessage);
           }
         }
         // Persist whatever we have
@@ -637,7 +657,7 @@ export async function runAgentLoop(
           allMessages = [...allMessages, am];
           await sessionManager?.appendMessage(am);
         }
-        const abortToolResults = toolResultsToMessages(streamingToolResults);
+        const abortToolResults = toolResultsToMessages(streamingToolResults, assistantMessages);
         for (const rm of abortToolResults) {
           allMessages = [...allMessages, rm];
           await sessionManager?.appendMessage(rm);
@@ -650,7 +670,7 @@ export async function runAgentLoop(
       for (const am of assistantMessages) {
         if (!am.isApiErrorMessage) {
           for (const block of am.content) {
-            if (block.type === "tool_call") {
+            if (block.type === "tool_use") {
               toolUseBlocks.push(block);
             }
           }
@@ -661,9 +681,9 @@ export async function runAgentLoop(
       // ── Yield pendingToolUseSummary from previous turn ────────────────────────
       // Summary (~1s) resolved during model streaming (5-30s).
       if (pendingToolUseSummary) {
-        const summary = await pendingToolUseSummary;
-        if (summary) {
-          onEvent({ type: "tool_execution_end", toolCallId: "", toolName: "__summary", result: { content: [{ type: "text", text: summary.summary }] }, isError: false });
+        const summaryText = await pendingToolUseSummary;
+        if (summaryText) {
+          onEvent({ type: "tool_execution_end", toolUseId: "", toolName: "__summary", result: { data: [{ type: "text", text: summaryText }] }, isError: false });
         }
       }
 
@@ -968,49 +988,56 @@ export async function runAgentLoop(
       }
 
       // Execute tools — streaming executor (remaining) or batch.
-      let toolCallResults: ToolCallResult[];
+      let toolCallResults: UserMessage[];
 
       if (streamingToolExecutor) {
         // Consume remaining results from streaming executor.
         // Results already obtained during streaming are in streamingToolResults.
-        const remaining: ToolCallResult[] = [];
-        for await (const result of streamingToolExecutor.getRemainingResults()) {
-          remaining.push(result);
+        const remaining: UserMessage[] = [];
+        for await (const update of streamingToolExecutor.getRemainingResults()) {
+          if (update.message) remaining.push(update.message as UserMessage);
         }
         toolCallResults = [...streamingToolResults, ...remaining];
       } else {
-        // Batch execution (fallback when streaming execution is disabled).
-        toolCallResults = await executeToolCalls(toolUseBlocks, {
+        // Batch execution with orchestrated partitioning.
+        // Aligned with claude-code's toolOrchestration.ts: consecutive concurrent-safe
+        // tools run in parallel batches (with concurrency limit), non-concurrent tools
+        // run serially one at a time.
+        const toolCallResultsBatch: UserMessage[] = [];
+        for await (const update of runToolsOrchestrated(toolUseBlocks, {
           tools: visibleTools,
-          mode: config.toolExecution,
-          approval: config.approval,
-          agentName: config.agentName,
-          signal: config.signal,
-          beforeToolCall: async (ctx) => {
-            const extResult = await extensionRunner?.emitToolCall({
-              toolName: ctx.toolName,
-              toolCallId: ctx.toolCallId,
-              args: ctx.args,
-            });
-            if (extResult?.block) return extResult;
-            return config.hooks?.beforeToolCall?.(ctx);
+          canUseTool: (async (_tool, _input, _ctx, _msg, _id) => ({ behavior: "allow" as const })) as CanUseToolFn,
+          toolUseContext: {
+            options: {
+              commands: [],
+              debug: false,
+              mainLoopModel: config.modelId,
+              tools: visibleTools,
+              verbose: false,
+              thinkingConfig: { type: "disabled" },
+              mcpClients: [],
+              mcpResources: {},
+              isNonInteractiveSession: true,
+              agentDefinitions: { activeAgents: [], allAgents: [] },
+            },
+            abortController: new AbortController(),
+            readFileState: { get: () => undefined, set() { return this; }, has: () => false, delete: () => false, clear: () => {}, get size() { return 0; } },
+            getAppState: () => ({}),
+            setAppState: () => {},
+            setInProgressToolUseIDs: () => {},
+            setResponseLength: () => {},
+            updateFileHistoryState: () => {},
+            updateAttributionState: () => {},
+            messages: allMessages as any[],
           },
-          afterToolCall: async (ctx) => {
-            const extResult = await extensionRunner?.emitToolResult({
-              toolName: ctx.toolName,
-              toolCallId: ctx.toolCallId,
-              args: ctx.args,
-              result: ctx.result,
-              isError: ctx.isError,
-            });
-            const hookResult = await config.hooks?.afterToolCall?.(ctx);
-            return hookResult ?? extResult ?? undefined;
-          },
-          onEvent: (e) => onEvent(e),
-        });
+          assistantMessage: assistantMessages[assistantMessages.length - 1] ?? { role: "assistant" as const, content: [] },
+        })) {
+          if (update.message) toolCallResultsBatch.push(update.message as UserMessage);
+        }
+        toolCallResults = toolCallResultsBatch;
       }
 
-      const toolResultMessages = toolResultsToMessages(toolCallResults);
+      const toolResultMessages = toolResultsToMessages(toolCallResults, assistantMessages);
       for (const rm of toolResultMessages) {
         allMessages = [...allMessages, rm];
         await sessionManager?.appendMessage(rm);
@@ -1027,15 +1054,31 @@ export async function runAgentLoop(
 
       // ── Generate tool use summary (async, for next turn) ──────────────────────
       // Promise created here, awaited in next iteration during model streaming.
-      let nextPendingToolUseSummary: Promise<ToolUseSummaryMessage | null> | undefined;
+      let nextPendingToolUseSummary: Promise<string | null> | undefined;
       if (config.toolUseSummary?.enabled && toolUseBlocks.length > 0 && !config.signal.aborted) {
         const lastText = extractLastAssistantText(assistantMessages);
+        // Build ToolInfo[] from toolUseBlocks + toolCallResults (matching by tool_use_id)
+        const tools: ToolInfo[] = toolUseBlocks.map((block) => {
+          const resultMsg = toolCallResults.find((msg) => {
+            if (typeof msg.content === "string") return false;
+            return Array.isArray(msg.content) && msg.content.some(
+              (b: any) => b.type === "tool_result" && b.tool_use_id === block.id,
+            );
+          });
+          return {
+            name: block.name,
+            input: block.input,
+            output: resultMsg ? (resultMsg.toolUseResult ?? resultMsg.content) : undefined,
+          };
+        });
         nextPendingToolUseSummary = generateToolUseSummary(
-          toolUseBlocks,
-          toolCallResults,
-          lastText,
+          {
+            tools,
+            signal: config.signal,
+            isNonInteractiveSession: config.toolUseSummary.isNonInteractiveSession ?? false,
+            lastAssistantText: lastText,
+          },
           config.toolUseSummary,
-          config.signal,
         );
       }
 

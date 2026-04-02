@@ -1,31 +1,35 @@
 // Built-in TaskTool — allows LLM to delegate work to subagents
 
-import { Type, type TSchema } from "@sinclair/typebox";
-import type { AgentTool, AgentToolResult, ToolExecutionContext } from "../tools/types.js";
+import { z } from "zod/v4";
+import type { AgentTool, AgentToolResult, ToolResultBlockParam } from "../tools/types.js";
+import { buildTool, DEFAULT_MAX_RESULT_SIZE_CHARS } from "../tools/types.js";
 import type { LaborMarket } from "./labor-market.js";
 import type { TaskExecutor } from "./task-executor.js";
 
 export function createTaskTool(laborMarket: LaborMarket, taskExecutor: TaskExecutor): AgentTool {
-  return {
+  return buildTool({
     name: "delegate_task",
-    label: "Delegate Task",
-    description: buildTaskToolDescription(laborMarket),
-    parameters: Type.Object({
-      subagent: Type.String({ description: "Name of the subagent to delegate to" }),
-      prompt: Type.String({ description: "The task prompt for the subagent" }),
+    async description() { return buildTaskToolDescription(laborMarket); },
+    async prompt() { return ""; },
+    maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
+    mapToolResultToToolResultBlockParam(content: unknown, toolUseID: string): ToolResultBlockParam {
+      return { type: "tool_result" as const, tool_use_id: toolUseID, content: typeof content === "string" ? content : JSON.stringify(content) };
+    },
+    renderToolUseMessage() { return null; },
+    inputSchema: z.strictObject({
+      subagent: z.string().describe("Name of the subagent to delegate to"),
+      prompt: z.string().describe("The task prompt for the subagent"),
     }),
 
-    async execute(
-      toolCallId: string,
+    async call(
       params: { subagent: string; prompt: string },
-      context: ToolExecutionContext,
     ): Promise<AgentToolResult> {
       const { subagent, prompt } = params;
 
       if (!laborMarket.has(subagent)) {
         const available = laborMarket.listAll().map((s) => s.name).join(", ");
         return {
-          content: [{ type: "text", text: `Unknown subagent: "${subagent}". Available: ${available || "none"}` }],
+          data: [{ type: "text", text: `Unknown subagent: "${subagent}". Available: ${available || "none"}` }],
         };
       }
 
@@ -37,15 +41,15 @@ export function createTaskTool(laborMarket: LaborMarket, taskExecutor: TaskExecu
           .join("\n") ?? "(no response)";
 
         return {
-          content: [{ type: "text", text: responseText }],
+          data: [{ type: "text", text: responseText }],
         };
       } catch (err) {
         return {
-          content: [{ type: "text", text: `Subagent error: ${err instanceof Error ? err.message : String(err)}` }],
+          data: [{ type: "text", text: `Subagent error: ${err instanceof Error ? err.message : String(err)}` }],
         };
       }
     },
-  };
+  }) as AgentTool;
 }
 
 function buildTaskToolDescription(laborMarket: LaborMarket): string {

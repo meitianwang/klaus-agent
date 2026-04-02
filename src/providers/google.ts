@@ -11,6 +11,7 @@ import type {
   TokenUsage,
   StopReason,
   Message,
+  ToolResultBlock,
 } from "../llm/types.js";
 import { generateId } from "../utils/id.js";
 import { withRetry, RETRYABLE_PATTERNS, mapThinkingBudget } from "./shared.js";
@@ -82,11 +83,11 @@ export class GeminiProvider implements LLMProvider {
         for (const fc of fnCalls) {
           const id = generateId();
           const input = (fc.args ?? {}) as Record<string, unknown>;
-          const block = { type: "tool_call" as const, id, name: fc.name, input };
+          const block = { type: "tool_use" as const, id, name: fc.name, input };
           contentBlocks.push(block);
-          yield { type: "tool_call_start", id, name: fc.name };
-          yield { type: "tool_call_delta", id, input: JSON.stringify(input) };
-          yield { type: "tool_call_end" as const, block: { ...block } };
+          yield { type: "tool_use_start", id, name: fc.name };
+          yield { type: "tool_use_delta", id, input: JSON.stringify(input) };
+          yield { type: "tool_use_end" as const, block: { ...block } };
         }
       }
 
@@ -133,6 +134,18 @@ function mapMessages(messages: Message[]): Content[] {
             parts.push({
               inlineData: { mimeType: block.source.mediaType, data: block.source.data },
             });
+          } else if (block.type === "tool_result") {
+            const trb = block as ToolResultBlock;
+            const toolName = findToolName(messages, trb.tool_use_id) ?? "unknown";
+            const responseContent = typeof trb.content === "string"
+              ? trb.content
+              : trb.content.map((b) => b.type === "text" ? b.text : JSON.stringify(b)).join("\n");
+            parts.push({
+              functionResponse: {
+                name: toolName,
+                response: { content: responseContent },
+              },
+            });
           }
         }
       }
@@ -142,7 +155,7 @@ function mapMessages(messages: Message[]): Content[] {
       for (const block of m.content) {
         if (block.type === "text") {
           parts.push({ text: block.text });
-        } else if (block.type === "tool_call") {
+        } else if (block.type === "tool_use") {
           parts.push({
             functionCall: { name: block.name, args: block.input },
           });
@@ -151,33 +164,17 @@ function mapMessages(messages: Message[]): Content[] {
         }
       }
       contents.push({ role: "model", parts });
-    } else {
-      // tool_result → functionResponse
-      // Need to find the tool name from previous assistant messages
-      const toolName = findToolName(messages, m.toolCallId) ?? "unknown";
-      const responseContent = typeof m.content === "string"
-        ? m.content
-        : m.content.map((b) => b.type === "text" ? b.text : JSON.stringify(b)).join("\n");
-      contents.push({
-        role: "user",
-        parts: [{
-          functionResponse: {
-            name: toolName,
-            response: { content: responseContent },
-          },
-        }],
-      });
     }
   }
 
   return contents;
 }
 
-function findToolName(messages: Message[], toolCallId: string): string | undefined {
+function findToolName(messages: Message[], toolUseId: string): string | undefined {
   for (const m of messages) {
     if (m.role === "assistant") {
       for (const block of m.content) {
-        if (block.type === "tool_call" && block.id === toolCallId) {
+        if (block.type === "tool_use" && block.id === toolUseId) {
           return block.name;
         }
       }

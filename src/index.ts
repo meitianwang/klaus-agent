@@ -97,7 +97,12 @@ export { AnthropicProvider } from "./providers/anthropic.js";
 export { OpenAIProvider } from "./providers/openai.js";
 export { OpenAIResponsesProvider } from "./providers/openai-responses.js";
 export { GeminiProvider } from "./providers/google.js";
-export { executeToolCalls } from "./tools/executor.js";
+export { runToolUse, createChildAbortController, classifyToolError } from "./tools/executor.js";
+export type { MessageUpdateLazy, McpServerType } from "./tools/executor.js";
+export { runPreToolUseHooks, runPostToolUseHooks, runPostToolUseFailureHooks, resolveHookPermissionDecision } from "./tools/tool-hooks.js";
+export type { PreToolHookYield, PostToolHookYield, PostToolUseHooksResult } from "./tools/tool-hooks.js";
+export type { HookExecutor, AggregatedHookResult, ExtensionRunnerHookExecutor } from "./hooks/hook-executor.js";
+export { runTools, runToolsOrchestrated, partitionToolCalls } from "./tools/orchestration.js";
 export { SessionManager } from "./session/session-manager.js";
 export { buildSessionContext } from "./session/session-context-builder.js";
 export { CheckpointManager } from "./checkpoint/checkpoint-manager.js";
@@ -109,7 +114,7 @@ export { TaskExecutor } from "./multi-agent/task-executor.js";
 export { ExtensionRunner } from "./extensions/runner.js";
 export { discoverSkills } from "./skills/discovery.js";
 export { loadSkill, renderSkillTemplate } from "./skills/loader.js";
-export { MCPAdapter } from "./tools/mcp-adapter.js";
+export { MCPAdapter, McpSessionExpiredError, McpAuthError, McpToolCallError, buildMcpToolName, normalizeNameForMCP } from "./tools/mcp-adapter.js";
 export { estimateTokens, shouldCompact, findCutPoint, microCompact } from "./compaction/compaction.js";
 export { calculateCost } from "./providers/shared.js";
 export { LLMSummarizer } from "./compaction/summarizer.js";
@@ -147,12 +152,117 @@ export type {
 // Tool types
 export type {
   AgentToolResult,
+  AgentToolDef,
+  AgentTools,
   ToolExecutionContext,
+  CanUseToolFn,
   BeforeToolCallContext,
   BeforeToolCallResult,
   AfterToolCallContext,
   AfterToolCallResult,
+  PostToolUseFailureContext,
+  PostToolUseFailureResult,
+  ValidationResult,
+  PermissionResult,
+  PermissionMode,
+  PermissionBehavior,
+  PermissionAllowDecision,
+  PermissionAskDecision,
+  PermissionDenyDecision,
+  PermissionUpdate,
+  PermissionDecisionReason,
+  ToolPermissionContext,
+  ToolPermissionRulesBySource,
+  AdditionalWorkingDirectory,
+  ToolProgressData,
+  ToolProgress,
+  ToolCallProgress,
+  ToolInputJSONSchema,
+  SpinnerMode,
+  SDKStatus,
+  CompactProgressEvent,
+  QueryChainTracking,
+  PromptRequest,
+  PromptResponse,
+  AgentId,
+  FileStateCache,
+  FileHistoryState,
+  AttributionState,
+  DenialTrackingState,
+  ThinkingConfig,
+  SystemPrompt,
+  MCPServerConnection,
+  ServerResource,
+  AgentDefinition,
+  AgentDefinitionsResult,
+  AgentToolUpdateCallback,
 } from "./tools/types.js";
+export { buildTool, toolMatchesName, findToolByName, DEFAULT_MAX_RESULT_SIZE_CHARS, getEmptyToolPermissionContext, filterToolProgressMessages } from "./tools/types.js";
+
+// New permission/classifier types (aligned with claude-code)
+export type {
+  PermissionRuleSource,
+  PermissionRuleValue,
+  PermissionRule,
+  PermissionUpdateDestination,
+  PermissionDecision,
+  PendingClassifierCheck,
+  PermissionCommandMetadata,
+  PermissionMetadata,
+  ContentBlockParam,
+  ClassifierResult,
+  ClassifierBehavior,
+  ClassifierUsage,
+  YoloClassifierResult,
+  RiskLevel,
+  PermissionExplanation,
+  WorkingDirectorySource,
+} from "./tools/types.js";
+
+// Tool result storage types
+export type {
+  PersistedToolResult,
+  PersistToolResultError,
+  ContentReplacementState,
+  ContentReplacementRecord,
+  ToolResultReplacementRecord,
+} from "./tools/tool-result-storage.js";
+export type {
+  ToolResultBlockParam,
+  ToolUseBlockParam,
+} from "./tools/types.js";
+export {
+  configureToolResultStorage,
+  persistToolResult,
+  buildLargeToolResultMessage,
+  enforceToolResultBudget,
+  applyToolResultBudget,
+  createContentReplacementState,
+  cloneContentReplacementState,
+  reconstructContentReplacementState,
+  reconstructForSubagentResume,
+  provisionContentReplacementState,
+  configurePerToolThresholdOverrides,
+  configurePerMessageBudgetLimit,
+  getPerMessageBudgetLimit,
+  getFileSystemErrorMessage,
+  generatePreview,
+  isToolResultContentEmpty,
+  getPersistenceThreshold,
+  processToolResultBlock,
+  processPreMappedToolResultBlock,
+} from "./tools/tool-result-storage.js";
+
+// Orchestration types
+export type { OrchestratedToolConfig, OrchestratedUpdate, MessageUpdate } from "./tools/orchestration.js";
+
+// Deferred tool utilities
+export { isDeferredTool, buildSchemaNotSentHint, formatDeferredToolLine } from "./tools/deferred-tools.js";
+export type { DeferredToolsDelta } from "./tools/deferred-tools.js";
+export { parseGitCommitId } from "./utils/gitOperationTracking.js";
+export type { AttachmentMessage, HookAttachment, HookBlockingError } from "./llm/types.js";
+export { generateToolUseSummary, createToolUseSummaryMessage } from "./services/tool-use-summary.js";
+export type { ToolUseSummaryConfig, ToolInfo, GenerateToolUseSummaryParams } from "./services/tool-use-summary.js";
 
 // Approval types
 export type {
@@ -170,6 +280,7 @@ export type {
   AssistantMessageEvent,
   UserMessage,
   ToolResultMessage,
+  ToolResultBlock,
   Message,
   TokenUsage,
   ModelCost,
@@ -177,6 +288,7 @@ export type {
   ContentBlock,
   TextContent,
   ImageContent,
+  ToolUseBlock,
   ToolCallBlock,
   ToolDefinition,
   StopReason,
@@ -244,7 +356,51 @@ export type {
 export type { Skill, SkillSource } from "./skills/types.js";
 
 // MCP types
-export type { MCPServerConfig, MCPTransport, MCPServerStatus, MCPClient } from "./tools/mcp-adapter.js";
+export type {
+  MCPServerConfig,
+  MCPTransport,
+  MCPServerStatus,
+  MCPClient,
+  MCPAdapterOptions,
+  MCPElicitationHandler,
+  MCPToolCollapseClassifier,
+  MCPToolFilter,
+} from "./tools/mcp-adapter.js";
+export { defaultMCPToolFilter } from "./tools/mcp-adapter.js";
+
+// Message constants and utilities
+export {
+  INTERRUPT_MESSAGE,
+  INTERRUPT_MESSAGE_FOR_TOOL_USE,
+  CANCEL_MESSAGE,
+  REJECT_MESSAGE,
+  REJECT_MESSAGE_WITH_REASON_PREFIX,
+  SUBAGENT_REJECT_MESSAGE,
+  SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
+  PLAN_REJECTION_PREFIX,
+  DENIAL_WORKAROUND_GUIDANCE,
+  AUTO_REJECT_MESSAGE,
+  DONT_ASK_REJECT_MESSAGE,
+  NO_RESPONSE_REQUESTED,
+  SYNTHETIC_TOOL_RESULT_PLACEHOLDER,
+  SYNTHETIC_MODEL,
+  SYNTHETIC_MESSAGES,
+  isClassifierDenial,
+  buildYoloRejectionMessage,
+  buildClassifierUnavailableMessage,
+  isSyntheticMessage,
+  deriveShortMessageId,
+  wrapToolUseError,
+  withMemoryCorrectionHint,
+  configureAutoMemory,
+  ensureToolResultPairing,
+  createToolResultMessage,
+  isToolResultMessage,
+  getToolResultBlocks,
+  getToolUseId,
+  getToolResultContent,
+  isToolResultError,
+} from "./utils/messages.js";
 
 // Wire types
 export type { WireMessage, WireSubscriber, WireSubscription } from "./wire/types.js";
