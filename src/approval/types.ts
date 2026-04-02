@@ -4,7 +4,7 @@ export type ApprovalResponse = "approve" | "approve_for_session" | "reject";
 
 export interface ApprovalRequest {
   id: string;
-  toolCallId: string;
+  toolUseId: string;
   sender: string;
   action: string;
   description: string;
@@ -16,7 +16,7 @@ export interface ApprovalConfig {
 }
 
 export interface Approval {
-  request(sender: string, action: string, description: string, toolCallId: string): Promise<boolean>;
+  request(sender: string, action: string, description: string, toolUseId: string): Promise<boolean>;
   fetchRequest(): Promise<ApprovalRequest>;
   resolve(requestId: string, response: ApprovalResponse): void;
   setYolo(yolo: boolean): void;

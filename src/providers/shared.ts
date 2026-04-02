@@ -21,9 +21,9 @@ function isRetryableError(error: Error, patterns: string[]): boolean {
  *
  * Retry strategy:
  * - Before any events yielded: always retry on retryable errors
- * - After text/thinking events only (no tool_call_start): retry is safe because
+ * - After text/thinking events only (no tool_use_start): retry is safe because
  *   the full assistant message will be reconstructed from the "done" event
- * - After tool_call_start: cannot retry (caller may have started acting on the tool call)
+ * - After tool_use_start: cannot retry (caller may have started acting on the tool use)
  */
 export async function* withRetry(
   streamOnce: () => AsyncIterable<AssistantMessageEvent>,
@@ -41,14 +41,14 @@ export async function* withRetry(
     let hasYieldedToolCall = false;
     try {
       for await (const event of streamOnce()) {
-        if (event.type === "tool_call_start") hasYieldedToolCall = true;
+        if (event.type === "tool_use_start") hasYieldedToolCall = true;
         yield event;
       }
       return;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
 
-      // Once a tool_call has been yielded, we cannot safely retry
+      // Once a tool_use has been yielded, we cannot safely retry
       // because the caller may have started processing it
       if (hasYieldedToolCall || !isRetryableError(lastError, retryablePatterns) || attempt === maxRetries) {
         throw lastError;

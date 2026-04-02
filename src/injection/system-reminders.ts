@@ -6,7 +6,7 @@
 // - One-shot context (e.g., conversation-start environment info)
 // - Conditional reminders based on conversation state
 
-import type { AgentMessage, Message, ToolCallBlock } from "../types.js";
+import type { AgentMessage, Message, ToolUseBlock } from "../types.js";
 import type { DynamicInjection, DynamicInjectionProvider } from "./types.js";
 
 /**
@@ -48,7 +48,7 @@ export class ToolUsageReminderProvider implements DynamicInjectionProvider {
       if (m.role === "assistant") {
         // Check if this assistant message used the tool
         const usedTool = m.content.some(
-          (b) => (b as ToolCallBlock).type === "tool_call" && (b as ToolCallBlock).name === this._config.toolName,
+          (b) => (b as ToolUseBlock).type === "tool_use" && (b as ToolUseBlock).name === this._config.toolName,
         );
         if (usedTool) {
           foundUse = true;

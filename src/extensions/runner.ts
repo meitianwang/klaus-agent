@@ -23,7 +23,6 @@ import type {
 import type { AgentTool } from "../tools/types.js";
 import type { AgentMessage } from "../types.js";
 import type { LLMProviderFactory } from "../llm/types.js";
-import type { TSchema } from "@sinclair/typebox";
 
 interface RegisteredExtension {
   handlers: Map<ExtensionEventType, ExtensionHandler<any>[]>;
@@ -50,7 +49,7 @@ export class ExtensionRunner {
           if (!ext.handlers.has(event)) ext.handlers.set(event, []);
           ext.handlers.get(event)!.push(handler);
         },
-        registerTool: <TParams extends TSchema>(tool: AgentTool<TParams>) => {
+        registerTool: (tool: AgentTool) => {
           ext.tools.push(tool as AgentTool);
         },
         registerCommand: (name: string, handler: CommandHandler) => {

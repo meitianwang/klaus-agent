@@ -4,7 +4,9 @@ import type {
   Message,
   UserMessage,
   AssistantMessage,
+  SystemMessage,
   ToolResultMessage,
+  ToolResultBlock,
   AssistantMessageEvent,
   TokenUsage,
   ModelCost,
@@ -14,10 +16,32 @@ import type {
   ContentBlock,
   TextContent,
   ImageContent,
+  ToolUseBlock,
   ToolCallBlock,
   ToolUseSummaryMessage,
 } from "./llm/types.js";
-import type { AgentTool, AgentToolResult, BeforeToolCallContext, BeforeToolCallResult, AfterToolCallContext, AfterToolCallResult } from "./tools/types.js";
+import type {
+  AgentTool,
+  AgentToolResult,
+  AgentToolDef,
+  CanUseToolFn,
+  BeforeToolCallContext,
+  BeforeToolCallResult,
+  AfterToolCallContext,
+  AfterToolCallResult,
+  ValidationResult,
+  PermissionResult,
+  PermissionMode,
+  PermissionBehavior,
+  ToolPermissionContext,
+  ToolProgressData,
+  ToolProgress,
+  ToolCallProgress,
+  ToolInputJSONSchema,
+  AgentTools,
+  AgentDefinition,
+  AgentDefinitionsResult,
+} from "./tools/types.js";
 import type { ApprovalRequest, ApprovalResponse, ApprovalConfig } from "./approval/types.js";
 
 // AgentMessage is Message. No custom extension — that was dead code (empty
@@ -42,13 +66,13 @@ export type AgentEvent =
   | { type: "agent_start" }
   | { type: "agent_end"; messages: AgentMessage[] }
   | { type: "turn_start" }
-  | { type: "turn_end"; message: AssistantMessage; toolResults: ToolResultMessage[] }
+  | { type: "turn_end"; message: AssistantMessage; toolResults: UserMessage[] }
   | { type: "message_start"; message: AssistantMessage }
   | { type: "message_update"; message: AssistantMessage; event: AssistantMessageEvent }
   | { type: "message_end"; message: AssistantMessage; usage?: TokenUsage }
-  | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_execution_update"; toolCallId: string; toolName: string; partialResult: AgentToolResult }
-  | { type: "tool_execution_end"; toolCallId: string; toolName: string; result: AgentToolResult; isError: boolean }
+  | { type: "tool_execution_start"; toolUseId: string; toolName: string; args: unknown }
+  | { type: "tool_execution_update"; toolUseId: string; toolName: string; partialResult: AgentToolResult }
+  | { type: "tool_execution_end"; toolUseId: string; toolName: string; result: AgentToolResult; isError: boolean }
   | { type: "approval_request"; request: ApprovalRequest }
   | { type: "approval_response"; requestId: string; response: ApprovalResponse }
   | { type: "compaction_start" }
@@ -92,7 +116,9 @@ export type {
   Message,
   UserMessage,
   AssistantMessage,
+  SystemMessage,
   ToolResultMessage,
+  ToolResultBlock,
   AssistantMessageEvent,
   TokenUsage,
   ModelCost,
@@ -102,14 +128,29 @@ export type {
   ContentBlock,
   TextContent,
   ImageContent,
+  ToolUseBlock,
   ToolCallBlock,
   ToolUseSummaryMessage,
   AgentTool,
   AgentToolResult,
+  AgentToolDef,
   BeforeToolCallContext,
   BeforeToolCallResult,
   AfterToolCallContext,
   AfterToolCallResult,
+  ValidationResult,
+  PermissionResult,
+  PermissionMode,
+  PermissionBehavior,
+  ToolPermissionContext,
+  ToolProgressData,
+  ToolProgress,
+  ToolCallProgress,
+  ToolInputJSONSchema,
+  AgentTools,
+  CanUseToolFn,
+  AgentDefinition,
+  AgentDefinitionsResult,
   ApprovalRequest,
   ApprovalResponse,
   ApprovalConfig,

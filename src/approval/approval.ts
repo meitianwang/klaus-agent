@@ -26,13 +26,13 @@ export class ApprovalImpl implements Approval {
     };
   }
 
-  async request(sender: string, action: string, description: string, toolCallId: string): Promise<boolean> {
+  async request(sender: string, action: string, description: string, toolUseId: string): Promise<boolean> {
     if (this._shared.yolo) return true;
     if (this._shared.autoApproveActions.has(action)) return true;
 
     const req: ApprovalRequest = {
       id: generateId(),
-      toolCallId,
+      toolUseId,
       sender,
       action,
       description,

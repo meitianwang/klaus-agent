@@ -1,7 +1,9 @@
 // Compaction logic — token estimation, cut point detection, shouldCompact
 
-import type { AgentMessage, Message, ToolResultMessage, ToolCallBlock } from "../types.js";
+import type { AgentMessage, Message } from "../types.js";
+import type { ToolResultBlock } from "../llm/types.js";
 import type { CutPointResult } from "./types.js";
+import { isToolResultMessage, getToolResultBlocks, getToolUseId, createToolResultMessage } from "../utils/messages.js";
 
 /**
  * Estimate token count for a string using a mixed heuristic:
@@ -37,6 +39,14 @@ function estimateMessageTokens(msg: AgentMessage): number {
     if (typeof m.content === "string") return estimateStringTokens(m.content);
     return m.content.reduce((sum, block) => {
       if (block.type === "text") return sum + estimateStringTokens(block.text);
+      if (block.type === "tool_result") {
+        const trb = block as ToolResultBlock;
+        if (typeof trb.content === "string") return sum + estimateStringTokens(trb.content);
+        return sum + trb.content.reduce((s, inner) => {
+          if (inner.type === "text") return s + estimateStringTokens(inner.text);
+          return s + 1000;
+        }, 0);
+      }
       return sum + 1000; // image estimate
     }, 0);
   }
@@ -45,16 +55,8 @@ function estimateMessageTokens(msg: AgentMessage): number {
     return m.content.reduce((sum, block) => {
       if (block.type === "text") return sum + estimateStringTokens(block.text);
       if (block.type === "thinking") return sum + estimateStringTokens(block.thinking);
-      if (block.type === "tool_call") return sum + estimateStringTokens(JSON.stringify(block.input)) + 20;
+      if (block.type === "tool_use") return sum + estimateStringTokens(JSON.stringify(block.input)) + 20;
       return sum;
-    }, 0);
-  }
-
-  if (m.role === "tool_result") {
-    if (typeof m.content === "string") return estimateStringTokens(m.content);
-    return m.content.reduce((sum, block) => {
-      if (block.type === "text") return sum + estimateStringTokens(block.text);
-      return sum + 1000;
     }, 0);
   }
 
@@ -99,10 +101,10 @@ export function findCutPoint(
     return { firstKeptIndex: 0, isSplitTurn: false };
   }
 
-  // Ensure we don't cut at a tool_result (must follow its tool_call)
+  // Ensure we don't cut at a tool_result (must follow its tool_use)
   while (cutIndex < messages.length) {
     const msg = messages[cutIndex];
-    if (msg && typeof msg === "object" && "role" in msg && (msg as Message).role === "tool_result") {
+    if (msg && typeof msg === "object" && "role" in msg && isToolResultMessage(msg as Message)) {
       cutIndex++;
     } else {
       break;
@@ -125,19 +127,19 @@ export function findCutPoint(
 export function microCompact(messages: Message[], keepRecent: number): Message[] {
   const toolResultIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
-    if (messages[i].role === "tool_result") {
+    if (isToolResultMessage(messages[i])) {
       toolResultIndices.push(i);
     }
   }
 
   if (toolResultIndices.length <= keepRecent) return messages;
 
-  // Build toolCallId → toolName map in one pass
+  // Build toolUseId → toolName map in one pass
   const toolCallNames = new Map<string, string>();
   for (const msg of messages) {
     if (msg.role === "assistant") {
       for (const b of msg.content) {
-        if (b.type === "tool_call") {
+        if (b.type === "tool_use") {
           toolCallNames.set(b.id, b.name);
         }
       }
@@ -148,15 +150,11 @@ export function microCompact(messages: Message[], keepRecent: number): Message[]
   const result = [...messages];
 
   for (const idx of toReplace) {
-    const msg = result[idx] as ToolResultMessage;
-    const toolName = toolCallNames.get(msg.toolCallId) ?? "tool";
+    const msg = result[idx];
+    const toolUseId = getToolUseId(msg)!;
+    const toolName = toolCallNames.get(toolUseId) ?? "tool";
 
-    result[idx] = {
-      role: "tool_result",
-      toolCallId: msg.toolCallId,
-      content: `[Previous: used ${toolName}]`,
-      ...(msg.isError && { isError: msg.isError }),
-    };
+    result[idx] = createToolResultMessage(toolUseId, `[Previous: used ${toolName}]`);
   }
 
   return result;

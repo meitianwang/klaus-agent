@@ -92,8 +92,8 @@ export class OpenAIResponsesProvider implements LLMProvider {
           const callId = item.call_id || id;
           const name = item.name || "";
           toolCalls.set(id, { id, name, args: "", callId });
-          contentBlocks.push({ type: "tool_call", id: callId, name, input: {} });
-          yield { type: "tool_call_start", id: callId, name };
+          contentBlocks.push({ type: "tool_use", id: callId, name, input: {} });
+          yield { type: "tool_use_start", id: callId, name };
         }
       }
 
@@ -105,21 +105,21 @@ export class OpenAIResponsesProvider implements LLMProvider {
           const entry = toolCalls.get(itemId);
           if (entry) {
             entry.args += delta;
-            yield { type: "tool_call_delta", id: entry.callId, input: delta };
+            yield { type: "tool_use_delta", id: entry.callId, input: delta };
           }
         }
       }
 
-      // Function call arguments complete — emit tool_call_end immediately
+      // Function call arguments complete — emit tool_use_end immediately
       if (type === "response.function_call_arguments.done") {
         const itemId = (event as any).item_id;
         if (itemId) {
           const entry = toolCalls.get(itemId);
           if (entry) {
-            const block = contentBlocks.find((b) => b.type === "tool_call" && b.id === entry.callId);
-            if (block && block.type === "tool_call") {
+            const block = contentBlocks.find((b) => b.type === "tool_use" && b.id === entry.callId);
+            if (block && block.type === "tool_use") {
               try { block.input = JSON.parse(entry.args || "{}"); } catch { block.input = {}; }
-              yield { type: "tool_call_end" as const, block: { ...block } };
+              yield { type: "tool_use_end" as const, block: { ...block } };
             }
           }
         }
@@ -151,8 +151,8 @@ export class OpenAIResponsesProvider implements LLMProvider {
 
     // Finalize tool call inputs
     for (const [, entry] of toolCalls) {
-      const block = contentBlocks.find((b) => b.type === "tool_call" && b.id === entry.callId);
-      if (block && block.type === "tool_call") {
+      const block = contentBlocks.find((b) => b.type === "tool_use" && b.id === entry.callId);
+      if (block && block.type === "tool_use") {
         try {
           block.input = JSON.parse(entry.args || "{}");
         } catch {

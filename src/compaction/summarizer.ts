@@ -3,6 +3,7 @@
 import type { LLMProvider, LLMRequestOptions, AssistantMessage } from "../llm/types.js";
 import type { AgentMessage } from "../types.js";
 import type { CompactionSummarizer, CompactionInput } from "./types.js";
+import { isToolResultMessage, getToolResultContent } from "../utils/messages.js";
 
 const SUMMARIZE_PROMPT = `You are a conversation summarizer. Summarize the following conversation history concisely, preserving:
 - Key decisions and outcomes
@@ -58,20 +59,24 @@ export function agentMessagesToCompactionInput(messages: AgentMessage[]): Compac
     const m = msg as any;
 
     if (m.role === "user") {
-      const text = typeof m.content === "string"
-        ? m.content
-        : (m.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-      results.push({ role: "user", content: text });
+      // Check if this is a tool result message
+      if (isToolResultMessage(m)) {
+        const content = getToolResultContent(m);
+        const text = typeof content === "string"
+          ? content
+          : (content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+        results.push({ role: "tool_result", content: text.slice(0, 500) });
+      } else {
+        const text = typeof m.content === "string"
+          ? m.content
+          : (m.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+        results.push({ role: "user", content: text });
+      }
     } else if (m.role === "assistant") {
       const text = (m.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-      const toolCalls = (m.content ?? []).filter((b: any) => b.type === "tool_call").map((b: any) => b.name);
+      const toolCalls = (m.content ?? []).filter((b: any) => b.type === "tool_use").map((b: any) => b.name);
       const suffix = toolCalls.length ? ` [tools: ${toolCalls.join(", ")}]` : "";
       results.push({ role: "assistant", content: text + suffix });
-    } else if (m.role === "tool_result") {
-      const text = typeof m.content === "string"
-        ? m.content
-        : (m.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
-      results.push({ role: "tool_result", content: text.slice(0, 500) });
     }
   }
   return results;

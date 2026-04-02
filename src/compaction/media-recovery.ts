@@ -51,15 +51,6 @@ export function stripImagesFromMessages(messages: Message[]): Message[] {
       });
       return { ...msg, content: stripped };
     }
-    if (msg.role === "tool_result" && Array.isArray(msg.content)) {
-      const stripped = msg.content.map((block) => {
-        if (block.type === "image") {
-          return { type: "text" as const, text: "[image]" };
-        }
-        return block;
-      });
-      return { ...msg, content: stripped };
-    }
     return msg;
   });
 }

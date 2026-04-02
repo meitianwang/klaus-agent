@@ -1,6 +1,6 @@
 // Extension system types
 
-import type { TSchema } from "@sinclair/typebox";
+import type { z } from "zod/v4";
 import type { AgentTool, AgentToolResult } from "../tools/types.js";
 import type { AgentMessage, ThinkingLevel } from "../types.js";
 import type { Message, ToolDefinition, LLMProviderFactory } from "../llm/types.js";
@@ -13,7 +13,7 @@ export type ExtensionFactory = (api: ExtensionAPI) => void | Promise<void>;
 
 export interface ExtensionAPI {
   on<E extends ExtensionEventType>(event: E, handler: ExtensionHandler<E>): void;
-  registerTool<TParams extends TSchema>(tool: AgentTool<TParams>): void;
+  registerTool<TParams extends z.ZodType<{ [key: string]: unknown }>>(tool: AgentTool<TParams>): void;
   registerCommand(name: string, handler: CommandHandler): void;
   registerProvider(name: string, factory: LLMProviderFactory): void;
   sendMessage(message: AgentMessage): void;
@@ -86,7 +86,7 @@ export interface BeforeProviderRequestResult {
 // tool_call / tool_result
 export interface ToolCallEvent {
   toolName: string;
-  toolCallId: string;
+  toolUseId: string;
   args: unknown;
 }
 
@@ -97,15 +97,14 @@ export interface ToolCallEventResult {
 
 export interface ToolResultEvent {
   toolName: string;
-  toolCallId: string;
+  toolUseId: string;
   args: unknown;
   result: AgentToolResult;
   isError: boolean;
 }
 
 export interface ToolResultEventResult {
-  content?: AgentToolResult["content"];
-  details?: unknown;
+  content?: AgentToolResult["data"];
   isError?: boolean;
 }
 

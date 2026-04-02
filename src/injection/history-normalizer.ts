@@ -1,6 +1,7 @@
 // History normalizer — merge adjacent user messages, validate message ordering
 
-import type { AgentMessage, Message, ContentBlock, ToolCallBlock } from "../types.js";
+import type { AgentMessage, Message, ContentBlock, ToolUseBlock, ToolResultBlock } from "../types.js";
+import { isToolResultMessage, getToolUseId } from "../utils/messages.js";
 
 export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
   if (messages.length === 0) return messages;
@@ -21,21 +22,21 @@ export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
 
   if (filtered.length === 0) return filtered;
 
-  // Phase 2: Validate tool_result messages have matching tool_call IDs.
-  // Build a set of valid tool_call IDs from assistant messages.
+  // Phase 2: Validate tool_result messages have matching tool_use IDs.
+  // Build a set of valid tool_use IDs from assistant messages.
   const validToolCallIds = new Set<string>();
   for (const msg of filtered) {
     if (typeof msg === "object" && "role" in msg && (msg as Message).role === "assistant") {
       const assistantMsg = msg as Message & { role: "assistant" };
       for (const block of assistantMsg.content) {
-        if ((block as ToolCallBlock).type === "tool_call") {
-          validToolCallIds.add((block as ToolCallBlock).id);
+        if ((block as ToolUseBlock).type === "tool_use") {
+          validToolCallIds.add((block as ToolUseBlock).id);
         }
       }
     }
   }
 
-  // Remove orphaned tool_result messages (no matching tool_call).
+  // Remove orphaned tool_result messages (no matching tool_use).
   // Only check after the first assistant message — tool_results before any
   // assistant message may be leftovers from compaction where the original
   // assistant message was discarded.
@@ -45,7 +46,7 @@ export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
     if (typeof msg === "object" && "role" in msg) {
       const m = msg as Message;
       if (m.role === "assistant") seenAssistant = true;
-      if (seenAssistant && m.role === "tool_result" && !validToolCallIds.has(m.toolCallId)) {
+      if (seenAssistant && isToolResultMessage(m) && !validToolCallIds.has(getToolUseId(m)!)) {
         continue; // orphaned tool_result — skip
       }
     }
@@ -77,7 +78,7 @@ export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
         ? [{ type: "text" as const, text: current.content }]
         : current.content;
 
-      const merged: ContentBlock[] = [...prevBlocks, ...currentBlocks];
+      const merged: (ContentBlock | ToolResultBlock)[] = [...prevBlocks, ...currentBlocks];
 
       // Optimize: if all blocks are text, collapse to a single string
       if (merged.every((b) => b.type === "text")) {
@@ -101,7 +102,7 @@ export function normalizeHistory(messages: AgentMessage[]): AgentMessage[] {
   // If the first message is assistant, prepend an empty context marker.
   if (result.length > 0 && typeof result[0] === "object" && "role" in result[0]) {
     const first = result[0] as Message;
-    if (first.role === "assistant" || first.role === "tool_result") {
+    if (first.role === "assistant" || isToolResultMessage(first)) {
       result.unshift({ role: "user", content: "[continued from previous context]" });
     }
   }

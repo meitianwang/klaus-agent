@@ -11,6 +11,7 @@
 
 import type { AgentMessage, Message, UserMessage } from "../types.js";
 import { estimateTokens } from "./compaction.js";
+import { isToolResultMessage } from "../utils/messages.js";
 
 /** A span of messages identified for summarization. */
 interface CollapseSpan {
@@ -124,7 +125,7 @@ export class ContextCollapseManager {
     const candidateEnd = Math.floor(allMessages.length * 0.6);
     if (candidateEnd < this.minSpanSize) return;
 
-    // Find spans of tool-use turns (assistant with tool_call + tool_result pairs)
+    // Find spans of tool-use turns (assistant with tool_use + tool_result pairs)
     let spanStart = -1;
     let i = 0;
 
@@ -136,13 +137,13 @@ export class ContextCollapseManager {
       }
 
       // Look for assistant messages with tool calls
-      if (msg.role === "assistant" && Array.isArray(msg.content) && msg.content.some((b: any) => b.type === "tool_call")) {
+      if (msg.role === "assistant" && Array.isArray(msg.content) && msg.content.some((b: any) => b.type === "tool_use")) {
         if (spanStart === -1) spanStart = i;
         // Skip past the tool_result messages that follow
         i++;
         while (i < candidateEnd) {
           const next = allMessages[i] as Message;
-          if (next && typeof next === "object" && "role" in next && next.role === "tool_result") {
+          if (next && typeof next === "object" && "role" in next && isToolResultMessage(next)) {
             i++;
           } else {
             break;
@@ -237,7 +238,7 @@ export class ContextCollapseManager {
     // Re-derive messagesForQuery from the new allMessages
     const newMessagesForQuery = result.filter((m): m is Message =>
       typeof m === "object" && m !== null && "role" in m &&
-      (m.role === "user" || m.role === "assistant" || m.role === "tool_result")
+      (m.role === "user" || m.role === "assistant")
     );
 
     return { messages: newMessagesForQuery, committed: uncommitted.length };
